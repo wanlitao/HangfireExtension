@@ -199,7 +199,10 @@ namespace Hangfire.SQLite
                 return _existingConnection;
             }
 
-            var connection = new SQLiteConnection(_connectionString);
+            var connection = new SQLiteConnection(_connectionString)
+            {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
+                Flags = SQLiteConnectionFlags.MapIsolationLevels
+            };
             connection.Open();
 
             return connection;

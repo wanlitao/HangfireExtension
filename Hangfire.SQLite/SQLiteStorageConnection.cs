@@ -252,7 +252,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
 			if (toScore < fromScore) throw new ArgumentException("The `toScore` value must be higher or equal to the `fromScore` value.");
 
             return _storage.UseConnection(connection => connection.Query<string>(
-                string.Format(@"select top 1 Value from [{0}.Set] where [Key] = @key and Score between @from and @to order by Score", _storage.GetSchemaName()),
+                string.Format(@"select Value from [{0}.Set] where [Key] = @key and Score between @from and @to order by Score limit 1", _storage.GetSchemaName()),
                 new { key, from = fromScore, to = toScore })
                 .SingleOrDefault());
         }

@@ -26,6 +26,7 @@ using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
 using Hangfire.Annotations;
 using Hangfire.SQLite.Entities;
+using Hangfire.SQLite.Common;
 
 namespace Hangfire.SQLite
 {
@@ -307,40 +308,41 @@ select * from [{0}.State] where JobId = @id order by Id desc", _storage.GetSchem
         public StatisticsDto GetStatistics()
         {
             string sql = string.Format(@"
-select count(Id) from [{0}.Job] where StateName = N'Enqueued';
-select count(Id) from [{0}.Job] where StateName = N'Failed';
-select count(Id) from [{0}.Job] where StateName = N'Processing';
-select count(Id) from [{0}.Job] where StateName = N'Scheduled';
+select count(Id) from [{0}.Job] where StateName = 'Enqueued';
+select count(Id) from [{0}.Job] where StateName = 'Failed';
+select count(Id) from [{0}.Job] where StateName = 'Processing';
+select count(Id) from [{0}.Job] where StateName = 'Scheduled';
 select count(Id) from [{0}.Server];
 select sum(s.[Value]) from (
-    select sum([Value]) as [Value] from [{0}.Counter] where [Key] = N'stats:succeeded'
+    select sum([Value]) as [Value] from [{0}.Counter] where [Key] = 'stats:succeeded'
     union all
-    select [Value] from [{0}.AggregatedCounter] where [Key] = N'stats:succeeded'
+    select [Value] from [{0}.AggregatedCounter] where [Key] = 'stats:succeeded'
 ) as s;
 select sum(s.[Value]) from (
-    select sum([Value]) as [Value] from [{0}.Counter] where [Key] = N'stats:deleted'
+    select sum([Value]) as [Value] from [{0}.Counter] where [Key] = 'stats:deleted'
     union all
-    select [Value] from [{0}.AggregatedCounter] where [Key] = N'stats:deleted'
+    select [Value] from [{0}.AggregatedCounter] where [Key] = 'stats:deleted'
 ) as s;
-select count(*) from [{0}.Set] where [Key] = N'recurring-jobs';
+select count(*) from [{0}.Set] where [Key] = 'recurring-jobs';
 ", _storage.GetSchemaName());
 
             var statistics = UseConnection(connection =>
             {
                 var stats = new StatisticsDto();
+
                 using (var multi = connection.QueryMultiple(sql))
-                {
-                    stats.Enqueued = multi.Read<int>().Single();
-                    stats.Failed = multi.Read<int>().Single();
-                    stats.Processing = multi.Read<int>().Single();
-                    stats.Scheduled = multi.Read<int>().Single();
+                {   //Dapper QueryMultiple情况下 multi.Read<T>()方法 对于基础类型 不会做类型转换
+                    stats.Enqueued = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                    stats.Failed = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                    stats.Processing = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                    stats.Scheduled = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
 
-                    stats.Servers = multi.Read<int>().Single();
+                    stats.Servers = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
 
-                    stats.Succeeded = multi.Read<long?>().SingleOrDefault() ?? 0;
-                    stats.Deleted = multi.Read<long?>().SingleOrDefault() ?? 0;
+                    stats.Succeeded = TypeConvertHelper.ParseDbValue<long?>(multi.Read(typeof(long?)).SingleOrDefault()) ?? 0;
+                    stats.Deleted = TypeConvertHelper.ParseDbValue<long?>(multi.Read(typeof(long?)).SingleOrDefault()) ?? 0;
 
-                    stats.Recurring = multi.Read<int>().Single();
+                    stats.Recurring = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
                 }
                 return stats;
             });
@@ -456,7 +458,7 @@ where j.Id in @jobIds", _storage.GetSchemaName());
         private long GetNumberOfJobsByStateName(SQLiteConnection connection, string stateName)
         {
             var sqlQuery = _jobListLimit.HasValue
-                ? string.Format(@"select count(j.Id) from (select top (@limit) Id from [{0}.Job] where StateName = @state) as j", _storage.GetSchemaName())
+                ? string.Format(@"select count(j.Id) from (select Id from [{0}.Job] where StateName = @state limit @limit) as j", _storage.GetSchemaName())
                 : string.Format(@"select count(Id) from [{0}.Job] where StateName = @state", _storage.GetSchemaName());
 
             var count = connection.Query<int>(
