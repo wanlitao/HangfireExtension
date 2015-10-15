@@ -23,13 +23,16 @@ using Dapper;
 using Hangfire.Annotations;
 using Hangfire.Storage;
 using System.Data.SQLite;
+using Hangfire.Logging;
 
 namespace Hangfire.SQLite
 {
     internal class SQLiteJobQueue : IPersistentJobQueue
     {
         private readonly SQLiteStorage _storage;
-        private readonly SQLiteStorageOptions _options;       
+        private readonly SQLiteStorageOptions _options;
+
+        private static readonly ILog Logger = LogProvider.GetCurrentClassLogger();
 
         public SQLiteJobQueue([NotNull] SQLiteStorage storage, SQLiteStorageOptions options)
         {
@@ -85,7 +88,7 @@ delete from [{0}.JobQueue] where Id = @id", _storage.GetSchemaName());
                     transaction.Dispose();
                     _storage.ReleaseConnection(connection);
                     throw;
-                }                
+                }
 
                 if (fetchedJob == null)
                 {

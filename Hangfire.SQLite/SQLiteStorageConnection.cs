@@ -68,7 +68,10 @@ namespace Hangfire.SQLite
 			}
 
 			var persistentQueue = providers[0].GetJobQueue();
-			return persistentQueue.Dequeue(queues, cancellationToken);
+            using (new SQLiteDistributedLock(_storage, "locks:jobqueue", TimeSpan.FromMinutes(1)))
+            {
+                return persistentQueue.Dequeue(queues, cancellationToken);
+            }
 		}
 
 		public override string CreateExpiredJob(
