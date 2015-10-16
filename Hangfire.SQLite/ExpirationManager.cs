@@ -84,7 +84,7 @@ namespace Hangfire.SQLite
                         {
                             distributedLock.Dispose();
                         }
-                    });
+                    }, true);
 
                     if (removedCount > 0)
                     {

@@ -25,6 +25,7 @@ using Hangfire.Storage;
 using System.Configuration;
 using System.Transactions;
 using IsolationLevel = System.Transactions.IsolationLevel;
+using System.Threading;
 
 namespace Hangfire.SQLite
 {
@@ -33,6 +34,8 @@ namespace Hangfire.SQLite
         private readonly SQLiteConnection _existingConnection;
         private readonly SQLiteStorageOptions _options;
         private readonly string _connectionString;
+        private static readonly TimeSpan ReaderWriterLockTimeout = TimeSpan.FromSeconds(30);
+        private static Dictionary<string, ReaderWriterLock> _dbMonitorCache = new Dictionary<string, ReaderWriterLock>();
 
         public SQLiteStorage(string nameOrConnectionString)
             : this(nameOrConnectionString, new SQLiteStorageOptions())
@@ -73,14 +76,19 @@ namespace Hangfire.SQLite
                                   nameOrConnectionString));
             }
 
+            if (!_dbMonitorCache.ContainsKey(_connectionString))
+            {
+                _dbMonitorCache.Add(_connectionString, new ReaderWriterLock());
+            }
+
             if (options.PrepareSchemaIfNecessary)
             {
-                using (var connection = CreateAndOpenConnection())
+                using (var connection = CreateAndOpenConnection(true))
                 {
                     SQLiteObjectsInstaller.Install(connection, options.SchemaName); 
                 }
-            }
-
+            }            
+            
             InitializeQueueProviders();
         }
 
@@ -148,22 +156,22 @@ namespace Hangfire.SQLite
             }
         }
 
-        internal void UseConnection([InstantHandle] Action<SQLiteConnection> action)
+        internal void UseConnection([InstantHandle] Action<SQLiteConnection> action, bool isWriteLock = false)
         {
             UseConnection(connection =>
             {
                 action(connection);
                 return true;
-            });
+            }, isWriteLock);
         }
 
-        internal T UseConnection<T>([InstantHandle] Func<SQLiteConnection, T> func)
+        internal T UseConnection<T>([InstantHandle] Func<SQLiteConnection, T> func, bool isWriteLock = false)
         {
             SQLiteConnection connection = null;
 
             try
             {
-                connection = CreateAndOpenConnection();
+                connection = CreateAndOpenConnection(isWriteLock);
                 return func(connection);
             }
             finally
@@ -185,18 +193,27 @@ namespace Hangfire.SQLite
         {
             using (var transaction = CreateTransaction(isolationLevel ?? _options.TransactionIsolationLevel))
             {
-                var result = UseConnection(func);
+                var result = UseConnection(func, true);
                 transaction.Complete();
 
                 return result;
             }
         }
 
-        internal SQLiteConnection CreateAndOpenConnection()
+        internal SQLiteConnection CreateAndOpenConnection(bool isWriteLock = false)
         {
             if (_existingConnection != null)
             {
                 return _existingConnection;
+            }
+
+            if (isWriteLock)
+            {
+                _dbMonitorCache[_connectionString].AcquireWriterLock(ReaderWriterLockTimeout);
+            }
+            else
+            {
+                _dbMonitorCache[_connectionString].AcquireReaderLock(ReaderWriterLockTimeout);
             }
 
             var connection = new SQLiteConnection(_connectionString)
@@ -212,7 +229,10 @@ namespace Hangfire.SQLite
         {
             if (connection != null && !ReferenceEquals(connection, _existingConnection))
             {
+                connection.Close();
                 connection.Dispose();
+
+                _dbMonitorCache[_connectionString].ReleaseLock();
             }
         }
 

@@ -68,10 +68,7 @@ namespace Hangfire.SQLite
 			}
 
 			var persistentQueue = providers[0].GetJobQueue();
-            using (new SQLiteDistributedLock(_storage, "locks:jobqueue", TimeSpan.FromMinutes(1)))
-            {
-                return persistentQueue.Dequeue(queues, cancellationToken);
-            }
+            return persistentQueue.Dequeue(queues, cancellationToken);            
 		}
 
 		public override string CreateExpiredJob(
@@ -124,7 +121,7 @@ values (@jobId, @name, @value)", _storage.GetSchemaName());
                 }
 
                 return jobId;
-            });
+            }, true);
         }
 
 		public override JobData GetJobData(string id)
@@ -221,7 +218,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
                     connection.Execute(string.Format(@"update {0} set Name = @name, Value = @value where JobId = @jobId;", tableName),
                     new { jobId = jobId, name, value });
                 }
-            });
+            }, true);
 		}
 
 		public override string GetJobParameter(string id, string name)
@@ -343,7 +340,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
                     connection.Execute(string.Format("update {0} set Data = @data, LastHeartbeat = datetime('now', 'utc') where Id = @id", tableName),
                         new { id = serverId, data = JobHelper.ToJson(data) });
                 }
-            });		
+            }, true);		
 
 			//_connection.Execute(
 			//    @";merge [HangFire.Server] with (holdlock) as Target "
@@ -363,7 +360,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
                 connection.Execute(
                     string.Format(@"delete from [{0}.Server] where Id = @id", _storage.GetSchemaName()),
                     new { id = serverId });
-            });
+            }, true);
         }
 
 		public override void Heartbeat(string serverId)
@@ -375,7 +372,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
                 connection.Execute(
                     string.Format(@"update [{0}.Server] set LastHeartbeat = datetime('now', 'utc') where Id = @id", _storage.GetSchemaName()),
                     new { id = serverId });
-            });
+            }, true);
         }
 
 		public override int RemoveTimedOutServers(TimeSpan timeOut)
@@ -387,7 +384,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
             return _storage.UseConnection(connection => connection.Execute(
                 string.Format(@"delete from [{0}.Server] where LastHeartbeat < @timeOutAt", _storage.GetSchemaName()),
-                new { timeOutAt = DateTime.UtcNow.Add(timeOut.Negate()) }));
+                new { timeOutAt = DateTime.UtcNow.Add(timeOut.Negate()) }), true);
         }
 
 		public override long GetSetCount(string key)

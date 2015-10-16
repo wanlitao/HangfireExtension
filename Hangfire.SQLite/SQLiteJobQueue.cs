@@ -72,7 +72,7 @@ delete from [{0}.JobQueue] where Id = @id", _storage.GetSchemaName());
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                connection = _storage.CreateAndOpenConnection();
+                connection = _storage.CreateAndOpenConnection(true);
                 transaction = connection.BeginTransaction(IsolationLevel.ReadCommitted);
 
                 try
