@@ -257,9 +257,9 @@ namespace Hangfire.SQLite
             {
 
                 string sql = string.Format(@"
-select * from [{0}.Job] where Id = @id
-select * from [{0}.JobParameter] where JobId = @id
-select * from [{0}.State] where JobId = @id order by Id desc", _storage.GetSchemaName());
+select * from [{0}.Job] where Id = @id;
+select * from [{0}.JobParameter] where JobId = @id;
+select * from [{0}.State] where JobId = @id order by Id desc;", _storage.GetSchemaName());
 
                 using (var multi = connection.QueryMultiple(sql, new { id = jobId }))
                 {
@@ -423,9 +423,9 @@ where [Key] in @keys", _storage.GetSchemaName());
             return monitoringApi;
         }
 
-        private T UseConnection<T>(Func<SQLiteConnection, T> action)
+        private T UseConnection<T>(Func<SQLiteConnection, T> action, bool isWriteLock = false)
         {
-            return _storage.UseTransaction(action, IsolationLevel.ReadUncommitted);
+            return _storage.UseConnection(action, isWriteLock);
         }
 
         private JobList<EnqueuedJobDto> EnqueuedJobs(

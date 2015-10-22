@@ -15,7 +15,7 @@
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
 using System;
-using System.Data;
+using Dapper;
 using Hangfire.Storage;
 using Hangfire.Annotations;
 
@@ -23,48 +23,52 @@ namespace Hangfire.SQLite
 {
     internal class SQLiteFetchedJob : IFetchedJob
     {
-        private readonly SQLiteStorage _storage;
-        private readonly IDbConnection _connection;
-        private readonly IDbTransaction _transaction;
+        private readonly SQLiteStorage _storage;       
 
         public SQLiteFetchedJob(
             [NotNull] SQLiteStorage storage,
-            [NotNull] IDbConnection connection,
-            [NotNull] IDbTransaction transaction,
+            int id,           
             string jobId,
             string queue)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
-            if (connection == null) throw new ArgumentNullException("connection");
-            if (transaction == null) throw new ArgumentNullException("transaction");
+            if (storage == null) throw new ArgumentNullException("storage");            
             if (jobId == null) throw new ArgumentNullException("jobId");
             if (queue == null) throw new ArgumentNullException("queue");
 
             _storage = storage;
-            _connection = connection;
-            _transaction = transaction;
 
+            Id = id;
             JobId = jobId;
             Queue = queue;
         }
 
+        public int Id { get; private set; }
         public string JobId { get; private set; }
         public string Queue { get; private set; }
 
         public void RemoveFromQueue()
         {
-            _transaction.Commit();
+            _storage.UseConnection(connection =>
+            {
+                connection.Execute(string.Format(@"
+                    delete from [{0}.JobQueue] where Id = @id", _storage.GetSchemaName()),
+                    new { id = Id });
+            }, true);
         }
 
         public void Requeue()
         {
-            _transaction.Rollback();
+            _storage.UseConnection(connection =>
+            {
+                connection.Execute(string.Format(@"
+                    update [{0}.JobQueue] set FetchedAt = null where Id = @id", _storage.GetSchemaName()),
+                    new { id = Id });
+            }, true);
         }
 
         public void Dispose()
         {
-            _transaction.Dispose();
-            _storage.ReleaseConnection(_connection);
+            
         }
     }
 }

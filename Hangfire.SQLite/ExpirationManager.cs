@@ -67,23 +67,15 @@ namespace Hangfire.SQLite
                 do
                 {
                     _storage.UseConnection(connection =>
-                    {
-                        var distributedLock = new SQLiteDistributedLock(_storage, DistributedLockKey, DefaultLockTimeout);                        
-
-                        try
-                        {
-                            removedCount = connection.Execute(
-                                String.Format(@"
-                                    delete from [{0}.{1}] where Id in (
-                                      select Id from [{0}.{1}]
-                                       where ExpireAt < datetime('now', 'utc')
-                                      limit @limit)", _storage.GetSchemaName(), table), 
-                                new { limit = NumberOfRecordsInSinglePass });
-                        }
-                        finally
-                        {
-                            distributedLock.Dispose();
-                        }
+                    {                        
+                        removedCount = connection.Execute(
+                            String.Format(@"
+                                delete from [{0}.{1}] where Id in (
+                                    select Id from [{0}.{1}]
+                                    where ExpireAt < @expireAt
+                                    limit @limit)", _storage.GetSchemaName(), table), 
+                            new { limit = NumberOfRecordsInSinglePass, expireAt = DateTime.UtcNow });
+                                                
                     }, true);
 
                     if (removedCount > 0)

@@ -45,10 +45,7 @@ namespace Hangfire.SQLite
 
 		public override IDisposable AcquireDistributedLock(string resource, TimeSpan timeout)
 		{
-            return new SQLiteDistributedLock(
-                _storage,
-                String.Format("{0}:{1}", _storage.GetSchemaName(), resource),
-                timeout);
+            return new SQLiteDistributedLock();
         }
 
 		public override IFetchedJob FetchNextJob(string[] queues, CancellationToken cancellationToken)
@@ -331,14 +328,14 @@ where j.Id = @jobId", _storage.GetSchemaName());
                 if (serverResult == null)
                 {
                     // if not found insert
-                    connection.Execute(string.Format("insert into {0} (Id, Data, LastHeartbeat) values (@id, @data, datetime('now', 'utc'))", tableName),
-                        new { id = serverId, data = JobHelper.ToJson(data) });
+                    connection.Execute(string.Format("insert into {0} (Id, Data, LastHeartbeat) values (@id, @data, @lastHeartbeat)", tableName),
+                        new { id = serverId, data = JobHelper.ToJson(data), lastHeartbeat = DateTime.UtcNow });
                 }
                 else
                 {
                     // if found, update data + heartbeart
-                    connection.Execute(string.Format("update {0} set Data = @data, LastHeartbeat = datetime('now', 'utc') where Id = @id", tableName),
-                        new { id = serverId, data = JobHelper.ToJson(data) });
+                    connection.Execute(string.Format("update {0} set Data = @data, LastHeartbeat = @lastHeartbeat where Id = @id", tableName),
+                        new { id = serverId, data = JobHelper.ToJson(data), lastHeartbeat = DateTime.UtcNow });
                 }
             }, true);		
 
@@ -370,8 +367,8 @@ where j.Id = @jobId", _storage.GetSchemaName());
             _storage.UseConnection(connection =>
             {
                 connection.Execute(
-                    string.Format(@"update [{0}.Server] set LastHeartbeat = datetime('now', 'utc') where Id = @id", _storage.GetSchemaName()),
-                    new { id = serverId });
+                    string.Format(@"update [{0}.Server] set LastHeartbeat = @lastHeartbeat where Id = @id", _storage.GetSchemaName()),
+                    new { id = serverId, lastHeartbeat = DateTime.UtcNow });
             }, true);
         }
 
@@ -380,7 +377,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
 			if (timeOut.Duration() != timeOut)
 			{
 				throw new ArgumentException("The `timeOut` value must be positive.", "timeOut");
-			}
+			}            
 
             return _storage.UseConnection(connection => connection.Execute(
                 string.Format(@"delete from [{0}.Server] where LastHeartbeat < @timeOutAt", _storage.GetSchemaName()),

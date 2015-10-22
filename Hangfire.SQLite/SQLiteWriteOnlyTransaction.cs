@@ -18,7 +18,6 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
-using System.Transactions;
 using System.Data.SQLite;
 using Dapper;
 using Hangfire.Common;
@@ -34,7 +33,7 @@ namespace Hangfire.SQLite
         //private readonly Queue<Action<System.Data.SQLite.SQLiteConnection>> _commandQueue = new Queue<Action<System.Data.SQLite.SQLiteConnection>>();
         private readonly Queue<Action<SQLiteConnection>> _commandQueue = new Queue<Action<SQLiteConnection>>();
         //private readonly SortedSet<string> _lockedResources = new SortedSet<string>();
-        private readonly SQLiteStorage _storage;
+        private readonly SQLiteStorage _storage;        
 
         public SQLiteWriteOnlyTransaction([NotNull] SQLiteStorage storage)
         {
@@ -47,20 +46,10 @@ namespace Hangfire.SQLite
         {
             _storage.UseTransaction(connection =>
             {
-                connection.EnlistTransaction(Transaction.Current);
-
-                //if (_lockedResources.Count > 0)
-                //{
-                //    connection.Execute(
-                //        "set nocount on;" +
-                //        "exec sp_getapplock @Resource=@resource, @LockMode=N'Exclusive'",
-                //        _lockedResources.Select(x => new { resource = x }));
-                //}
-
                 foreach (var command in _commandQueue)
                 {
                     command(connection);
-                }
+                }                
             });
         }
 

@@ -48,7 +48,7 @@ namespace Hangfire.SQLite
             {
                 if (_queuesCache.Count == 0 || _cacheUpdated.Add(QueuesCacheTimeout) < DateTime.UtcNow)
                 {
-                    var result = UseTransaction(connection =>
+                    var result = UseConnection(connection =>
                     {
                         return connection.Query(sqlQuery).Select(x => (string)x.Queue).ToList();
                     });
@@ -69,7 +69,7 @@ namespace Hangfire.SQLite
                order by Id
                limit @limit offset @offset", _storage.GetSchemaName());
 
-            return UseTransaction(connection =>
+            return UseConnection(connection =>
             {
                 return connection.Query<JobIdDto>(
                     sqlQuery,
@@ -90,7 +90,7 @@ namespace Hangfire.SQLite
             string sqlQuery = string.Format(@"
 select count(Id) from [{0}.JobQueue] where [Queue] = @queue", _storage.GetSchemaName());
 
-            return UseTransaction(connection =>
+            return UseConnection(connection =>
             {
                 var result = connection.Query<int>(sqlQuery, new { queue = queue }).Single();
 
@@ -101,9 +101,9 @@ select count(Id) from [{0}.JobQueue] where [Queue] = @queue", _storage.GetSchema
             });
         }
 
-        private T UseTransaction<T>(Func<SQLiteConnection, T> func)
+        private T UseConnection<T>(Func<SQLiteConnection, T> func, bool isWriteLock = false)
         {
-            return _storage.UseTransaction(func, IsolationLevel.ReadUncommitted);
+            return _storage.UseConnection(func, isWriteLock);
         }
 
         // ReSharper disable once ClassNeverInstantiated.Local

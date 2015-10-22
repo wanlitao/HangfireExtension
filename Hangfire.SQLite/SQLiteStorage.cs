@@ -35,7 +35,7 @@ namespace Hangfire.SQLite
         private readonly SQLiteStorageOptions _options;
         private readonly string _connectionString;
         private static readonly TimeSpan ReaderWriterLockTimeout = TimeSpan.FromSeconds(30);
-        private static Dictionary<string, ReaderWriterLock> _dbMonitorCache = new Dictionary<string, ReaderWriterLock>();
+        private static Dictionary<string, ReaderWriterLock> _dbMonitorCache = new Dictionary<string, ReaderWriterLock>();     
 
         public SQLiteStorage(string nameOrConnectionString)
             : this(nameOrConnectionString, new SQLiteStorageOptions())
@@ -83,10 +83,10 @@ namespace Hangfire.SQLite
 
             if (options.PrepareSchemaIfNecessary)
             {
-                using (var connection = CreateAndOpenConnection(true))
+                UseConnection(connection =>
                 {
-                    SQLiteObjectsInstaller.Install(connection, options.SchemaName); 
-                }
+                    SQLiteObjectsInstaller.Install(connection, options.SchemaName);
+                });
             }            
             
             InitializeQueueProviders();
@@ -145,6 +145,8 @@ namespace Hangfire.SQLite
                 builder.Append(connectionStringBuilder.DataSource);
                 builder.Append(", Version: ");
                 builder.Append(connectionStringBuilder.Version);
+                builder.Append(", Journal Mode: ");
+                builder.Append(connectionStringBuilder.JournalMode);
 
                 return builder.Length != 0
                     ? String.Format("SQLite Server: {0}", builder)
@@ -173,7 +175,7 @@ namespace Hangfire.SQLite
             {
                 connection = CreateAndOpenConnection(isWriteLock);
                 return func(connection);
-            }
+            }                 
             finally
             {
                 ReleaseConnection(connection);
@@ -210,15 +212,11 @@ namespace Hangfire.SQLite
             if (isWriteLock)
             {
                 _dbMonitorCache[_connectionString].AcquireWriterLock(ReaderWriterLockTimeout);
-            }
-            else
-            {
-                _dbMonitorCache[_connectionString].AcquireReaderLock(ReaderWriterLockTimeout);
-            }
+            }            
 
             var connection = new SQLiteConnection(_connectionString)
             {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
-                Flags = SQLiteConnectionFlags.MapIsolationLevels
+                Flags = SQLiteConnectionFlags.MapIsolationLevels                
             };
             connection.Open();
 
@@ -232,8 +230,17 @@ namespace Hangfire.SQLite
                 connection.Close();
                 connection.Dispose();
 
-                _dbMonitorCache[_connectionString].ReleaseLock();
+                ReleaseDbWriteLock();
             }
+        }
+
+        internal void ReleaseDbWriteLock()
+        {
+            var dbMonitor = _dbMonitorCache[_connectionString];
+            if (dbMonitor.IsWriterLockHeld)
+            {
+                dbMonitor.ReleaseWriterLock();
+            }            
         }
 
         internal string GetSchemaName()

@@ -22,17 +22,13 @@ using System.Threading;
 using Dapper;
 using Hangfire.Annotations;
 using Hangfire.Storage;
-using System.Data.SQLite;
-using Hangfire.Logging;
 
 namespace Hangfire.SQLite
 {
     internal class SQLiteJobQueue : IPersistentJobQueue
     {
         private readonly SQLiteStorage _storage;
-        private readonly SQLiteStorageOptions _options;
-
-        private static readonly ILog Logger = LogProvider.GetCurrentClassLogger();
+        private readonly SQLiteStorageOptions _options;        
 
         public SQLiteJobQueue([NotNull] SQLiteStorage storage, SQLiteStorageOptions options)
         {
@@ -49,9 +45,7 @@ namespace Hangfire.SQLite
             if (queues == null) throw new ArgumentNullException("queues");
             if (queues.Length == 0) throw new ArgumentException("Queue array must be non-empty.", "queues");
 
-            FetchedJob fetchedJob;
-            SQLiteConnection connection = null;
-            SQLiteTransaction transaction = null;
+            FetchedJob fetchedJob = null;
 
 //            string fetchJobSqlTemplate = string.Format(@"
 //delete top (1) from [{0}].JobQueue with (readpast, updlock, rowlock)
@@ -61,56 +55,41 @@ namespace Hangfire.SQLite
 
             string fetchNextJobSqlTemplate = string.Format(@"
 select * from [{0}.JobQueue]
-where (FetchedAt is null or FetchedAt < datetime('now', 'utc', '{1} second'))
+where (FetchedAt is null or FetchedAt < @fetchedAt)
 and Queue in @queues
-limit 1", _storage.GetSchemaName(), _options.InvisibilityTimeout.Negate().TotalSeconds);
+limit 1", _storage.GetSchemaName());
 
             string dequeueJobSqlTemplate = string.Format(@"
-delete from [{0}.JobQueue] where Id = @id", _storage.GetSchemaName());
+update [{0}.JobQueue] set FetchedAt = @fetchedAt where Id = @id", _storage.GetSchemaName());
 
             do
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                connection = _storage.CreateAndOpenConnection(true);
-                transaction = connection.BeginTransaction(IsolationLevel.ReadCommitted);
-
-                try
+                _storage.UseConnection(connection =>
                 {
                     fetchedJob = connection.Query<FetchedJob>(
                                fetchNextJobSqlTemplate,
-                               new { queues = queues },
-                               transaction)
+                               new { queues = queues, fetchedAt = DateTime.UtcNow })
                                .SingleOrDefault();
-                }
-                catch (SQLiteException)
-                {
-                    transaction.Dispose();
-                    _storage.ReleaseConnection(connection);
-                    throw;
-                }
 
-                if (fetchedJob == null)
-                {
-                    transaction.Rollback();
-                    transaction.Dispose();
-                    _storage.ReleaseConnection(connection);
-                    
-                    cancellationToken.WaitHandle.WaitOne(_options.QueuePollInterval);
-                    cancellationToken.ThrowIfCancellationRequested();                    
-                }
-                else
-                {
-                    // delete
-                    connection.Execute(dequeueJobSqlTemplate,
-                        new { id = fetchedJob.Id });
-                }
+                    if (fetchedJob == null)
+                    {
+                        cancellationToken.WaitHandle.WaitOne(_options.QueuePollInterval);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    else
+                    {
+                        // update
+                        connection.Execute(dequeueJobSqlTemplate,
+                            new { id = fetchedJob.Id, fetchedAt = DateTime.UtcNow });
+                    }
+                }, true);
             } while (fetchedJob == null);
 
             return new SQLiteFetchedJob(
                 _storage,
-                connection,
-                transaction,
+                fetchedJob.Id,                
                 fetchedJob.JobId.ToString(CultureInfo.InvariantCulture),
                 fetchedJob.Queue);
         }

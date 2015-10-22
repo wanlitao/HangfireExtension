@@ -3,14 +3,6 @@
 
 );
 
-CREATE TABLE [$(HangFireSchema).Lock] (
-        [Id]    INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-		[Resource] nvarchar(100) NOT NULL COLLATE NOCASE
-);
-CREATE UNIQUE INDEX [Lock_IX_HangFire_Lock_Resource]
-ON [$(HangFireSchema).Lock]
-([Resource]);
-
 CREATE TABLE [$(HangFireSchema).Job] (
         [Id]    INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         [StateId]       integer,
