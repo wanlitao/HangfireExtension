@@ -35,7 +35,7 @@ namespace Hangfire.SQLite
         private readonly SQLiteStorageOptions _options;
         private readonly string _connectionString;
         private static readonly TimeSpan ReaderWriterLockTimeout = TimeSpan.FromSeconds(30);
-        private static Dictionary<string, ReaderWriterLock> _dbMonitorCache = new Dictionary<string, ReaderWriterLock>();     
+        private static Dictionary<string, ReaderWriterLockSlim> _dbMonitorCache = new Dictionary<string, ReaderWriterLockSlim>();
 
         public SQLiteStorage(string nameOrConnectionString)
             : this(nameOrConnectionString, new SQLiteStorageOptions())
@@ -78,7 +78,7 @@ namespace Hangfire.SQLite
 
             if (!_dbMonitorCache.ContainsKey(_connectionString))
             {
-                _dbMonitorCache.Add(_connectionString, new ReaderWriterLock());
+                _dbMonitorCache.Add(_connectionString, new ReaderWriterLockSlim());
             }
 
             if (options.PrepareSchemaIfNecessary)
@@ -211,7 +211,7 @@ namespace Hangfire.SQLite
 
             if (isWriteLock)
             {
-                _dbMonitorCache[_connectionString].AcquireWriterLock(ReaderWriterLockTimeout);
+                _dbMonitorCache[_connectionString].TryEnterWriteLock(ReaderWriterLockTimeout);
             }            
 
             var connection = new SQLiteConnection(_connectionString)
@@ -237,9 +237,9 @@ namespace Hangfire.SQLite
         internal void ReleaseDbWriteLock()
         {
             var dbMonitor = _dbMonitorCache[_connectionString];
-            if (dbMonitor.IsWriterLockHeld)
+            if (dbMonitor.IsWriteLockHeld)
             {
-                dbMonitor.ReleaseWriterLock();
+                dbMonitor.ExitWriteLock();
             }            
         }
 

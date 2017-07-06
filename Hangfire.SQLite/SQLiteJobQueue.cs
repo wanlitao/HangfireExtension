@@ -73,18 +73,19 @@ update [{0}.JobQueue] set FetchedAt = @fetchedAt where Id = @id", _storage.GetSc
                                new { queues = queues, fetchedAt = DateTime.UtcNow })
                                .SingleOrDefault();
 
-                    if (fetchedJob == null)
-                    {
-                        cancellationToken.WaitHandle.WaitOne(_options.QueuePollInterval);
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-                    else
+                    if (fetchedJob != null)
                     {
                         // update
                         connection.Execute(dequeueJobSqlTemplate,
                             new { id = fetchedJob.Id, fetchedAt = DateTime.UtcNow });
                     }
                 }, true);
+
+                if (fetchedJob == null)
+                {
+                    cancellationToken.WaitHandle.WaitOne(_options.QueuePollInterval);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
             } while (fetchedJob == null);
 
             return new SQLiteFetchedJob(

@@ -212,7 +212,7 @@ where j.Id = @jobId", _storage.GetSchemaName());
                 else
                 {
                     // update
-                    connection.Execute(string.Format(@"update {0} set Name = @name, Value = @value where JobId = @jobId;", tableName),
+                    connection.Execute(string.Format(@"update {0} set Value = @value where JobId = @jobId and Name = @name;", tableName),
                     new { jobId = jobId, name, value });
                 }
             }, true);
