@@ -1,4 +1,4 @@
-// This file is part of Hangfire.
+Ôªø// This file is part of Hangfire.
 // Copyright ?2013-2014 Sergey Odinokov.
 // 
 // Hangfire is free software: you can redistribute it and/or modify
@@ -17,7 +17,6 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SQLite;
 using System.Text;
 using Hangfire.Annotations;
 using Hangfire.Server;
@@ -26,6 +25,12 @@ using System.Configuration;
 using System.Transactions;
 using IsolationLevel = System.Transactions.IsolationLevel;
 using System.Threading;
+#if NETSTANDARD2_0
+using SQLiteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+using SQLiteConnectionStringBuilder = Microsoft.Data.Sqlite.SqliteConnectionStringBuilder;
+#else
+using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {
@@ -61,20 +66,7 @@ namespace Hangfire.SQLite
 
             _options = options;
 
-            if (IsConnectionString(nameOrConnectionString))
-            {
-                _connectionString = nameOrConnectionString;
-            }
-            else if (IsConnectionStringInConfiguration(nameOrConnectionString))
-            {
-                _connectionString = ConfigurationManager.ConnectionStrings[nameOrConnectionString].ConnectionString;
-            }
-            else
-            {
-                throw new ArgumentException(
-                    string.Format("Could not find connection string with name '{0}' in application config file",
-                                  nameOrConnectionString));
-            }
+            _connectionString = GetConnectionString(nameOrConnectionString);
 
             if (!_dbMonitorCache.ContainsKey(_connectionString))
             {
@@ -87,8 +79,8 @@ namespace Hangfire.SQLite
                 {
                     SQLiteObjectsInstaller.Install(connection, options.SchemaName);
                 });
-            }            
-            
+            }
+
             InitializeQueueProviders();
         }
 
@@ -143,10 +135,24 @@ namespace Hangfire.SQLite
 
                 builder.Append("Data Source: ");
                 builder.Append(connectionStringBuilder.DataSource);
+#if NETSTANDARD2_0
+                if (connectionStringBuilder.ContainsKey("Version"))
+                {
+                    builder.Append(", Version: ");
+                    builder.Append(connectionStringBuilder["Version"]);
+                }
+
+                if (connectionStringBuilder.ContainsKey("JournalMode"))
+                {
+                    builder.Append(", JournalMode: ");
+                    builder.Append(connectionStringBuilder["JournalMode"]);
+                }
+#else
                 builder.Append(", Version: ");
                 builder.Append(connectionStringBuilder.Version);
                 builder.Append(", Journal Mode: ");
                 builder.Append(connectionStringBuilder.JournalMode);
+#endif
 
                 return builder.Length != 0
                     ? String.Format("SQLite Server: {0}", builder)
@@ -175,7 +181,7 @@ namespace Hangfire.SQLite
             {
                 connection = CreateAndOpenConnection(isWriteLock);
                 return func(connection);
-            }                 
+            }
             finally
             {
                 ReleaseConnection(connection);
@@ -212,11 +218,13 @@ namespace Hangfire.SQLite
             if (isWriteLock)
             {
                 _dbMonitorCache[_connectionString].TryEnterWriteLock(ReaderWriterLockTimeout);
-            }            
+            }
 
             var connection = new SQLiteConnection(_connectionString)
-            {   //SQLite÷ª÷ß≥÷IsolationLevel.Serializable∫ÕIsolationLevel.ReadCommitted, …Ë÷√∆‰À¸IsolationLevel◊‘∂Ø◊™ªªŒ™’‚¡Ω÷÷÷Æ“ª
-                Flags = SQLiteConnectionFlags.MapIsolationLevels                
+            {
+#if !NETSTANDARD2_0
+                Flags = SQLiteConnectionFlags.MapIsolationLevels
+#endif
             };
             connection.Open();
 
@@ -240,7 +248,7 @@ namespace Hangfire.SQLite
             if (dbMonitor.IsWriteLockHeld)
             {
                 dbMonitor.ExitWriteLock();
-            }            
+            }
         }
 
         internal string GetSchemaName()
@@ -267,11 +275,33 @@ namespace Hangfire.SQLite
             return nameOrConnectionString.Contains(";");
         }
 
+#if !NETSTANDARD2_0
         private bool IsConnectionStringInConfiguration(string connectionStringName)
         {
             var connectionStringSetting = ConfigurationManager.ConnectionStrings[connectionStringName];
 
             return connectionStringSetting != null;
+        }
+#endif
+
+        private string GetConnectionString(string nameOrConnectionString)
+        {
+#if NETSTANDARD2_0
+            return nameOrConnectionString;
+#else
+            if (IsConnectionString(nameOrConnectionString))
+            {
+                return nameOrConnectionString;
+            }
+
+            if (IsConnectionStringInConfiguration(nameOrConnectionString))
+            {
+                return ConfigurationManager.ConnectionStrings[nameOrConnectionString].ConnectionString;
+            }
+
+            throw new ArgumentException(
+                $"Could not find connection string with name '{nameOrConnectionString}' in application config file");
+#endif
         }
     }
 }

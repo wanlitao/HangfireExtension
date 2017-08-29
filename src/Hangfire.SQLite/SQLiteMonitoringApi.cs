@@ -18,7 +18,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Transactions;
-using System.Data.SQLite;
 using Dapper;
 using Hangfire.Common;
 using Hangfire.States;
@@ -27,6 +26,11 @@ using Hangfire.Storage.Monitoring;
 using Hangfire.Annotations;
 using Hangfire.SQLite.Entities;
 using Hangfire.SQLite.Common;
+#if NETSTANDARD2_0
+using SQLiteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+#else
+using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {
@@ -45,7 +49,7 @@ namespace Hangfire.SQLite
 
         public long ScheduledCount()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetNumberOfJobsByStateName(connection, ScheduledState.StateName));
         }
 
@@ -107,13 +111,13 @@ namespace Hangfire.SQLite
 
         public IDictionary<DateTime, long> SucceededByDatesCount()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetTimelineStats(connection, "succeeded"));
         }
 
         public IDictionary<DateTime, long> FailedByDatesCount()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetTimelineStats(connection, "failed"));
         }
 
@@ -241,13 +245,13 @@ namespace Hangfire.SQLite
 
         public IDictionary<DateTime, long> HourlySucceededJobs()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetHourlyTimelineStats(connection, "succeeded"));
         }
 
         public IDictionary<DateTime, long> HourlyFailedJobs()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetHourlyTimelineStats(connection, "failed"));
         }
 
@@ -295,13 +299,13 @@ select * from [{0}.State] where JobId = @id order by Id desc;", _storage.GetSche
 
         public long SucceededListCount()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetNumberOfJobsByStateName(connection, SucceededState.StateName));
         }
 
         public long DeletedListCount()
         {
-            return UseConnection(connection => 
+            return UseConnection(connection =>
                 GetNumberOfJobsByStateName(connection, DeletedState.StateName));
         }
 

@@ -20,7 +20,11 @@ using System.Linq;
 using System.Transactions;
 using Dapper;
 using Hangfire.Annotations;
+#if NETSTANDARD2_0
+using SQLiteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+#else
 using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {

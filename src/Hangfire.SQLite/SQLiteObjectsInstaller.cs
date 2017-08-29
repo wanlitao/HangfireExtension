@@ -20,7 +20,12 @@ using System.IO;
 using System.Reflection;
 using Dapper;
 using Hangfire.Logging;
+#if NETSTANDARD2_0
+using SQLiteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+using SQLiteException = Microsoft.Data.Sqlite.SqliteException;
+#else
 using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {
@@ -28,7 +33,7 @@ namespace Hangfire.SQLite
     internal static class SQLiteObjectsInstaller
     {
         private const int RequiredSchemaVersion = 5;
-        private const int RetryAttempts = 3;        
+        private const int RetryAttempts = 3;
 
         private static readonly ILog Log = LogProvider.GetLogger(typeof(SQLiteStorage));
 
@@ -40,11 +45,11 @@ namespace Hangfire.SQLite
         public static void Install(SQLiteConnection connection, string schema)
         {
             if (connection == null) throw new ArgumentNullException("connection");
-            
+
             Log.Info("Start installing Hangfire SQL objects...");
 
             var script = GetStringResource(
-                typeof(SQLiteObjectsInstaller).Assembly, 
+                typeof(SQLiteObjectsInstaller).Assembly,
                 "Hangfire.SQLite.Install.sql");
 
             script = script.Replace("SET @TARGET_SCHEMA_VERSION = 5;", "SET @TARGET_SCHEMA_VERSION = " + RequiredSchemaVersion + ";");
@@ -60,7 +65,7 @@ namespace Hangfire.SQLite
                 }
                 catch (SQLiteException ex)
                 {
-                    throw;                    
+                    throw;
                 }
             }
 
@@ -71,7 +76,7 @@ namespace Hangfire.SQLite
         {
             using (var stream = assembly.GetManifestResourceStream(resourceName))
             {
-                if (stream == null) 
+                if (stream == null)
                 {
                     throw new InvalidOperationException(String.Format(
                         "Requested resource `{0}` was not found in the assembly `{1}`.",
