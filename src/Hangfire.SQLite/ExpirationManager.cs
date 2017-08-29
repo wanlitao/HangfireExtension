@@ -24,7 +24,7 @@ namespace Hangfire.SQLite
 {
     internal class ExpirationManager : IServerComponent
     {
-        private static readonly ILog Logger = LogProvider.GetCurrentClassLogger();
+        private static readonly ILog Logger = LogProvider.For<ExpirationManager>();
 
         private const string DistributedLockKey = "locks:expirationmanager";
         private static readonly TimeSpan DefaultLockTimeout = TimeSpan.FromMinutes(5);
@@ -67,15 +67,15 @@ namespace Hangfire.SQLite
                 do
                 {
                     _storage.UseConnection(connection =>
-                    {                        
+                    {
                         removedCount = connection.Execute(
                             String.Format(@"
                                 delete from [{0}.{1}] where Id in (
                                     select Id from [{0}.{1}]
                                     where ExpireAt < @expireAt
-                                    limit @limit)", _storage.GetSchemaName(), table), 
+                                    limit @limit)", _storage.GetSchemaName(), table),
                             new { limit = NumberOfRecordsInSinglePass, expireAt = DateTime.UtcNow });
-                                                
+
                     }, true);
 
                     if (removedCount > 0)

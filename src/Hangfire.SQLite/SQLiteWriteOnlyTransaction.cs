@@ -1,4 +1,4 @@
-// This file is part of Hangfire.
+﻿// This file is part of Hangfire.
 // Copyright ?2013-2014 Sergey Odinokov.
 // 
 // Hangfire is free software: you can redistribute it and/or modify
@@ -18,13 +18,17 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
-using System.Data.SQLite;
 using Dapper;
 using Hangfire.Common;
 using Hangfire.States;
 using Hangfire.Storage;
 using Hangfire.Annotations;
 using Hangfire.SQLite.Entities;
+#if NETSTANDARD2_0
+using SQLiteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+#else
+using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {
@@ -33,7 +37,7 @@ namespace Hangfire.SQLite
         //private readonly Queue<Action<System.Data.SQLite.SQLiteConnection>> _commandQueue = new Queue<Action<System.Data.SQLite.SQLiteConnection>>();
         private readonly Queue<Action<SQLiteConnection>> _commandQueue = new Queue<Action<SQLiteConnection>>();
         //private readonly SortedSet<string> _lockedResources = new SortedSet<string>();
-        private readonly SQLiteStorage _storage;        
+        private readonly SQLiteStorage _storage;
 
         public SQLiteWriteOnlyTransaction([NotNull] SQLiteStorage storage)
         {
@@ -49,7 +53,7 @@ namespace Hangfire.SQLite
                 foreach (var command in _commandQueue)
                 {
                     command(connection);
-                }                
+                }
             });
         }
 
@@ -97,10 +101,10 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
                 addStateSql,
                 new
                 {
-                    jobId = jobId, 
+                    jobId = jobId,
                     name = state.Name,
                     reason = state.Reason,
-                    createdAt = DateTime.UtcNow, 
+                    createdAt = DateTime.UtcNow,
                     data = JobHelper.ToJson(state.SerializeData())
                 }));
         }
@@ -148,12 +152,12 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
 
         public override void AddToSet(string key, string value, double score)
         {
-//            string addSql = string.Format(@"
-//;merge [{0}.Set] as Target
-//using (VALUES (@key, @value, @score)) as Source ([Key], Value, Score)
-//on Target.[Key] = Source.[Key] and Target.Value = Source.Value
-//when matched then update set Score = Source.Score
-//when not matched then insert ([Key], Value, Score) values (Source.[Key], Source.Value, Source.Score);", _storage.GetSchemaName());
+            //            string addSql = string.Format(@"
+            //;merge [{0}.Set] as Target
+            //using (VALUES (@key, @value, @score)) as Source ([Key], Value, Score)
+            //on Target.[Key] = Source.[Key] and Target.Value = Source.Value
+            //when matched then update set Score = Source.Score
+            //when not matched then insert ([Key], Value, Score) values (Source.[Key], Source.Value, Source.Score);", _storage.GetSchemaName());
 
             AcquireSetLock();
             QueueCommand(connection =>
@@ -162,7 +166,7 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
                 var selectSqlStr = string.Format("select * from {0} where [Key] = @key and Value = @value", tableName);
                 var insertSqlStr = string.Format("insert into {0} ([Key], Value, Score) values (@key, @value, @score)", tableName);
                 var updateSqlStr = string.Format("update {0} set Score = @score where [Key] = @key and Value = @value ", tableName);
-                
+
                 var fetchedSet = connection.Query<SqlSet>(selectSqlStr,
                     new { key = key, value = value });
                 if (!fetchedSet.Any())
@@ -174,7 +178,7 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
                 {
                     connection.Execute(updateSqlStr,
                         new { key = key, value, score });
-                }                
+                }
             });
         }
 
@@ -206,12 +210,12 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
 
         public override void TrimList(string key, int keepStartingFrom, int keepEndingAt)
         {
-//            string trimSql = string.Format(@"
-//;with cte as (
-//    select row_number() over (order by Id desc) as row_num, [Key] 
-//    from [{0}].List
-//    where [Key] = @key)
-//delete from cte where row_num not between @start and @end", _storage.GetSchemaName());
+            //            string trimSql = string.Format(@"
+            //;with cte as (
+            //    select row_number() over (order by Id desc) as row_num, [Key] 
+            //    from [{0}].List
+            //    where [Key] = @key)
+            //delete from cte where row_num not between @start and @end", _storage.GetSchemaName());
 
             string trimSql = string.Format(@"
 delete from [{0}.List] where [Key] = @key and Id not in (
@@ -228,12 +232,12 @@ delete from [{0}.List] where [Key] = @key and Id not in (
             if (key == null) throw new ArgumentNullException("key");
             if (keyValuePairs == null) throw new ArgumentNullException("keyValuePairs");
 
-//            string sql = string.Format(@"
-//;merge [{0}.Hash] as Target
-//using (VALUES (@key, @field, @value)) as Source ([Key], Field, Value)
-//on Target.[Key] = Source.[Key] and Target.Field = Source.Field
-//when matched then update set Value = Source.Value
-//when not matched then insert ([Key], Field, Value) values (Source.[Key], Source.Field, Source.Value);", _storage.GetSchemaName());
+            //            string sql = string.Format(@"
+            //;merge [{0}.Hash] as Target
+            //using (VALUES (@key, @field, @value)) as Source ([Key], Field, Value)
+            //on Target.[Key] = Source.[Key] and Target.Field = Source.Field
+            //when matched then update set Value = Source.Value
+            //when not matched then insert ([Key], Field, Value) values (Source.[Key], Source.Field, Source.Value);", _storage.GetSchemaName());
 
             AcquireHashLock();
             QueueCommand(connection =>
@@ -381,7 +385,7 @@ update [{0}.List] set ExpireAt = null where [Key] = @key", _storage.GetSchemaNam
 
         private void AcquireLock(string resource)
         {
-            
+
         }
     }
 }
