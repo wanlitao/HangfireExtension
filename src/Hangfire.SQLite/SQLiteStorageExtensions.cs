@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
 using Hangfire.Annotations;
+using System;
 
 // ReSharper disable once CheckNamespace
 namespace Hangfire.SQLite
@@ -26,8 +26,8 @@ namespace Hangfire.SQLite
             [NotNull] this IGlobalConfiguration configuration,
             [NotNull] string nameOrConnectionString)
         {
-            if (configuration == null) throw new ArgumentNullException("configuration");
-            if (nameOrConnectionString == null) throw new ArgumentNullException("nameOrConnectionString");
+            if (configuration == null) throw new ArgumentNullException(nameof(configuration));
+            if (nameOrConnectionString == null) throw new ArgumentNullException(nameof(nameOrConnectionString));
 
             var storage = new SQLiteStorage(nameOrConnectionString);
             return configuration.UseStorage(storage);
@@ -38,9 +38,9 @@ namespace Hangfire.SQLite
             [NotNull] string nameOrConnectionString,
             [NotNull] SQLiteStorageOptions options)
         {
-            if (configuration == null) throw new ArgumentNullException("configuration");
-            if (nameOrConnectionString == null) throw new ArgumentNullException("nameOrConnectionString");
-            if (options == null) throw new ArgumentNullException("options");
+            if (configuration == null) throw new ArgumentNullException(nameof(configuration));
+            if (nameOrConnectionString == null) throw new ArgumentNullException(nameof(nameOrConnectionString));
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
             var storage = new SQLiteStorage(nameOrConnectionString, options);
             return configuration.UseStorage(storage);

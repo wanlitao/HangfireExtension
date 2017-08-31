@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
-using System.Threading;
 using Dapper;
 using Hangfire.Logging;
 using Hangfire.Server;
+using System;
+using System.Threading;
 
 namespace Hangfire.SQLite
 {
@@ -50,7 +50,7 @@ namespace Hangfire.SQLite
 
         public ExpirationManager(SQLiteStorage storage, TimeSpan checkInterval)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
 
             _storage = storage;
             _checkInterval = checkInterval;
@@ -60,7 +60,7 @@ namespace Hangfire.SQLite
         {
             foreach (var table in ProcessedTables)
             {
-                Logger.DebugFormat("Removing outdated records from table '{0}'...", table);
+                Logger.Debug($"Removing outdated records from the '{table}' table...");
 
                 int removedCount = 0;
 
@@ -69,18 +69,17 @@ namespace Hangfire.SQLite
                     _storage.UseConnection(connection =>
                     {                        
                         removedCount = connection.Execute(
-                            String.Format(@"
-                                delete from [{0}.{1}] where Id in (
-                                    select Id from [{0}.{1}]
+                               $@"delete from [{ _storage.SchemaName}.{table}] where Id in (
+                                    select Id from [{_storage.SchemaName}.{table}]
                                     where ExpireAt < @expireAt
-                                    limit @limit)", _storage.GetSchemaName(), table), 
+                                    limit @limit)", 
                             new { limit = NumberOfRecordsInSinglePass, expireAt = DateTime.UtcNow });
                                                 
                     }, true);
 
                     if (removedCount > 0)
                     {
-                        Logger.Trace(String.Format("Removed {0} outdated record(s) from '{1}' table.", removedCount, table));
+                        Logger.Trace($"Removed {removedCount} outdated record(s) from the '{table}' table.");
 
                         cancellationToken.WaitHandle.WaitOne(DelayBetweenPasses);
                         cancellationToken.ThrowIfCancellationRequested();

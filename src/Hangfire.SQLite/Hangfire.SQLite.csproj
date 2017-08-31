@@ -89,7 +89,6 @@
     <Compile Include="SQLiteStorageExtensions.cs" />
     <Compile Include="SQLiteStorageOptions.cs" />
     <Compile Include="SQLiteWriteOnlyTransaction.cs" />
-    <Compile Include="Common\TypeConvertHelper.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Install.sql" />

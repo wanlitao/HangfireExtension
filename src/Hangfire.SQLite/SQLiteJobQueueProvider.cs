@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
 using Hangfire.Annotations;
+using System;
 
 namespace Hangfire.SQLite
 {
@@ -26,8 +26,8 @@ namespace Hangfire.SQLite
 
         public SQLiteJobQueueProvider([NotNull] SQLiteStorage storage, [NotNull] SQLiteStorageOptions options)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
-            if (options == null) throw new ArgumentNullException("options");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
             _jobQueue = new SQLiteJobQueue(storage, options);
             _monitoringApi = new SQLiteJobQueueMonitoringApi(storage);

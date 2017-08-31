@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS [$(HangFireSchema).State] (
 ,
     FOREIGN KEY ([JobId])
         REFERENCES [$(HangFireSchema).Job]([Id])
+		ON UPDATE CASCADE
+        ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS [State_IX_HangFire_State_JobId]
 ON [$(HangFireSchema).State]
@@ -43,6 +45,8 @@ CREATE TABLE IF NOT EXISTS [$(HangFireSchema).JobParameter] (
 ,
     FOREIGN KEY ([JobId])
         REFERENCES [$(HangFireSchema).Job]([Id])
+		ON UPDATE CASCADE
+        ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS [JobParameter_IX_HangFire_JobParameter_JobIdAndName]
 ON [$(HangFireSchema).JobParameter]
@@ -51,7 +55,7 @@ ON [$(HangFireSchema).JobParameter]
 CREATE TABLE IF NOT EXISTS [$(HangFireSchema).JobQueue] (
         [Id]    INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         [JobId] integer NOT NULL,
-        [Queue] nvarchar(20) NOT NULL COLLATE NOCASE,
+        [Queue] nvarchar(50) NOT NULL COLLATE NOCASE,
         [FetchedAt]     datetime
 
 );
@@ -60,7 +64,7 @@ ON [$(HangFireSchema).JobQueue]
 ([Queue] DESC, [FetchedAt] DESC);
 
 CREATE TABLE IF NOT EXISTS [$(HangFireSchema).Server] (
-        [Id]    nvarchar(50) PRIMARY KEY NOT NULL COLLATE NOCASE,
+        [Id]    nvarchar(100) PRIMARY KEY NOT NULL COLLATE NOCASE,
         [Data]  nvarchar COLLATE NOCASE,
         [LastHeartbeat] datetime NOT NULL
 

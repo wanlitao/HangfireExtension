@@ -14,19 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Transactions;
-using System.Data.SQLite;
 using Dapper;
+using Hangfire.Annotations;
 using Hangfire.Common;
+using Hangfire.SQLite.Entities;
 using Hangfire.States;
 using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
-using Hangfire.Annotations;
-using Hangfire.SQLite.Entities;
-using Hangfire.SQLite.Common;
+using System;
+using System.Collections.Generic;
+using System.Data.Common;
+using System.Linq;
 
 namespace Hangfire.SQLite
 {
@@ -37,7 +35,7 @@ namespace Hangfire.SQLite
 
         public SQLiteMonitoringApi([NotNull] SQLiteStorage storage, int? jobListLimit)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
 
             _storage = storage;
             _jobListLimit = jobListLimit;
@@ -122,20 +120,20 @@ namespace Hangfire.SQLite
             return UseConnection<IList<ServerDto>>(connection =>
             {
                 var servers = connection.Query<Entities.Server>(
-                    string.Format(@"select * from [{0}.Server]", _storage.GetSchemaName()))
+                    $@"select * from [{_storage.SchemaName}.Server]")
                     .ToList();
 
                 var result = new List<ServerDto>();
 
                 foreach (var server in servers)
                 {
-                    var data = JobHelper.FromJson<Entities.ServerData>(server.Data);
+                    var data = JobHelper.FromJson<ServerData>(server.Data);
                     result.Add(new ServerDto
                     {
                         Name = server.Id,
                         Heartbeat = server.LastHeartbeat,
                         Queues = data.Queues,
-                        StartedAt = data.StartedAt.HasValue ? data.StartedAt.Value : DateTime.MinValue,
+                        StartedAt = data.StartedAt ?? DateTime.MinValue,
                         WorkersCount = data.WorkerCount
                     });
                 }
@@ -190,7 +188,7 @@ namespace Hangfire.SQLite
                 (sqlJob, job, stateData) => new DeletedJobDto
                 {
                     Job = job,
-                    DeletedAt = JobHelper.DeserializeNullableDateTime(stateData["DeletedAt"])
+                    DeletedAt = JobHelper.DeserializeNullableDateTime(stateData.ContainsKey("DeletedAt") ? stateData["DeletedAt"] : null)
                 }));
         }
 
@@ -256,10 +254,10 @@ namespace Hangfire.SQLite
             return UseConnection(connection =>
             {
 
-                string sql = string.Format(@"
-select * from [{0}.Job] where Id = @id;
-select * from [{0}.JobParameter] where JobId = @id;
-select * from [{0}.State] where JobId = @id order by Id desc;", _storage.GetSchemaName());
+                string sql = $@"
+select * from [{_storage.SchemaName}.Job] where Id = @id;
+select * from [{_storage.SchemaName}.JobParameter] where JobId = @id;
+select * from [{_storage.SchemaName}.State] where JobId = @id order by Id desc;";
 
                 using (var multi = connection.QueryMultiple(sql, new { id = jobId }))
                 {
@@ -324,25 +322,25 @@ select sum(s.[Value]) from (
     select [Value] from [{0}.AggregatedCounter] where [Key] = 'stats:deleted'
 ) as s;
 select count(*) from [{0}.Set] where [Key] = 'recurring-jobs';
-", _storage.GetSchemaName());
+", _storage.SchemaName);
 
             var statistics = UseConnection(connection =>
             {
                 var stats = new StatisticsDto();
 
                 using (var multi = connection.QueryMultiple(sql))
-                {   //Dapper QueryMultiple情况下 multi.Read<T>()方法 对于基础类型 不会做类型转换
-                    stats.Enqueued = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
-                    stats.Failed = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
-                    stats.Processing = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
-                    stats.Scheduled = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                {
+                    stats.Enqueued = multi.ReadSingle<int>();
+                    stats.Failed = multi.ReadSingle<int>();
+                    stats.Processing = multi.ReadSingle<int>();
+                    stats.Scheduled = multi.ReadSingle<int>();
 
-                    stats.Servers = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                    stats.Servers = multi.ReadSingle<int>();
 
-                    stats.Succeeded = TypeConvertHelper.ParseDbValue<long?>(multi.Read(typeof(long?)).SingleOrDefault()) ?? 0;
-                    stats.Deleted = TypeConvertHelper.ParseDbValue<long?>(multi.Read(typeof(long?)).SingleOrDefault()) ?? 0;
+                    stats.Succeeded = multi.ReadSingleOrDefault<long?>() ?? 0;
+                    stats.Deleted = multi.ReadSingleOrDefault<long?>() ?? 0;
 
-                    stats.Recurring = TypeConvertHelper.ParseDbValue<int>(multi.Read(typeof(int)).Single());
+                    stats.Recurring = multi.ReadSingle<int>();
                 }
                 return stats;
             });
@@ -355,8 +353,7 @@ select count(*) from [{0}.Set] where [Key] = 'recurring-jobs';
         }
 
         private Dictionary<DateTime, long> GetHourlyTimelineStats(
-            SQLiteConnection connection,
-            string type)
+            DbConnection connection, string type)
         {
             var endDate = DateTime.UtcNow;
             var dates = new List<DateTime>();
@@ -366,14 +363,13 @@ select count(*) from [{0}.Set] where [Key] = 'recurring-jobs';
                 endDate = endDate.AddHours(-1);
             }
 
-            var keyMaps = dates.ToDictionary(x => String.Format("stats:{0}:{1}", type, x.ToString("yyyy-MM-dd-HH")), x => x);
+            var keyMaps = dates.ToDictionary(x => $"stats:{type}:{x.ToString("yyyy-MM-dd-HH")}", x => x);
 
             return GetTimelineStats(connection, keyMaps);
         }
 
         private Dictionary<DateTime, long> GetTimelineStats(
-            SQLiteConnection connection,
-            string type)
+            DbConnection connection, string type)
         {
             var endDate = DateTime.UtcNow.Date;
             var dates = new List<DateTime>();
@@ -383,17 +379,17 @@ select count(*) from [{0}.Set] where [Key] = 'recurring-jobs';
                 endDate = endDate.AddDays(-1);
             }
 
-            var keyMaps = dates.ToDictionary(x => String.Format("stats:{0}:{1}", type, x.ToString("yyyy-MM-dd")), x => x);
+            var keyMaps = dates.ToDictionary(x => $"stats:{type}:{x.ToString("yyyy-MM-dd")}", x => x);
 
             return GetTimelineStats(connection, keyMaps);
         }
 
-        private Dictionary<DateTime, long> GetTimelineStats(SQLiteConnection connection,
+        private Dictionary<DateTime, long> GetTimelineStats(DbConnection connection,
             IDictionary<string, DateTime> keyMaps)
         {
-            string sqlQuery = string.Format(@"
-select [Key], [Value] as [Count] from [{0}.AggregatedCounter]
-where [Key] in @keys", _storage.GetSchemaName());
+            string sqlQuery = 
+$@"select [Key], [Value] as [Count] from [{_storage.SchemaName}.AggregatedCounter]
+where [Key] in @keys";
 
             var valuesMap = connection.Query(
                 sqlQuery,
@@ -423,28 +419,31 @@ where [Key] in @keys", _storage.GetSchemaName());
             return monitoringApi;
         }
 
-        private T UseConnection<T>(Func<SQLiteConnection, T> action, bool isWriteLock = false)
+        private T UseConnection<T>(Func<DbConnection, T> action, bool isWriteLock = false)
         {
             return _storage.UseConnection(action, isWriteLock);
         }
 
         private JobList<EnqueuedJobDto> EnqueuedJobs(
-            SQLiteConnection connection,
-            IEnumerable<int> jobIds)
+            DbConnection connection, IEnumerable<int> jobIds)
         {
-            string enqueuedJobsSql = string.Format(@"
-select j.*, s.Reason as StateReason, s.Data as StateData 
-from [{0}.Job] j
-left join [{0}.State] s on s.Id = j.StateId
-where j.Id in @jobIds", _storage.GetSchemaName());
+            string enqueuedJobsSql = 
+$@"select j.*, s.Reason as StateReason, s.Data as StateData 
+from [{_storage.SchemaName}.Job] j
+left join [{_storage.SchemaName}.State] s on s.Id = j.StateId
+where j.Id in @jobIds";
 
             var jobs = connection.Query<SqlJob>(
                 enqueuedJobsSql,
                 new { jobIds = jobIds })
+                .ToDictionary(x => x.Id, x => x);
+
+            var sortedSqlJobs = jobIds
+                .Select(jobId => jobs.ContainsKey(jobId) ? jobs[jobId] : new SqlJob { Id = jobId })
                 .ToList();
 
             return DeserializeJobs(
-                jobs,
+                sortedSqlJobs,
                 (sqlJob, job, stateData) => new EnqueuedJobDto
                 {
                     Job = job,
@@ -455,16 +454,15 @@ where j.Id in @jobIds", _storage.GetSchemaName());
                 });
         }
 
-        private long GetNumberOfJobsByStateName(SQLiteConnection connection, string stateName)
+        private long GetNumberOfJobsByStateName(DbConnection connection, string stateName)
         {
             var sqlQuery = _jobListLimit.HasValue
-                ? string.Format(@"select count(j.Id) from (select Id from [{0}.Job] where StateName = @state limit @limit) as j", _storage.GetSchemaName())
-                : string.Format(@"select count(Id) from [{0}.Job] where StateName = @state", _storage.GetSchemaName());
+                ? $@"select count(j.Id) from (select Id from [{_storage.SchemaName}.Job] where StateName = @state limit @limit) as j"
+                : $@"select count(Id) from [{_storage.SchemaName}.Job] where StateName = @state";
 
-            var count = connection.Query<int>(
+            var count = connection.ExecuteScalar<int>(
                  sqlQuery,
-                 new { state = stateName, limit = _jobListLimit })
-                 .Single();
+                 new { state = stateName, limit = _jobListLimit });
 
             return count;
         }
@@ -485,19 +483,19 @@ where j.Id in @jobIds", _storage.GetSchemaName());
         }
 
         private JobList<TDto> GetJobs<TDto>(
-            SQLiteConnection connection,
+            DbConnection connection,
             int from,
             int count,
             string stateName,
-            Func<Entities.SqlJob, Job, Dictionary<string, string>, TDto> selector)
+            Func<SqlJob, Job, Dictionary<string, string>, TDto> selector)
         {
-            string jobsSql = string.Format(@"
-  select j.*, s.Reason as StateReason, s.Data as StateData
-  from [{0}.Job] j
-  left join [{0}.State] s on j.StateId = s.Id
+            string jobsSql = 
+$@"select j.Id, j.InvocationData, j.Arguments, s.Reason as StateReason, s.Data as StateData
+  from [{_storage.SchemaName}.Job] j
+  left join [{_storage.SchemaName}.State] s on j.StateId = s.Id
   where j.StateName = @stateName
   order by j.Id desc
-  limit @limit offset @offset", _storage.GetSchemaName());
+  limit @limit offset @offset";
 
             var jobs = connection.Query<SqlJob>(
                         jobsSql,
@@ -515,12 +513,17 @@ where j.Id in @jobIds", _storage.GetSchemaName());
 
             foreach (var job in jobs)
             {
-                var deserializedData = JobHelper.FromJson<Dictionary<string, string>>(job.StateData);
-                var stateData = deserializedData != null
-                    ? new Dictionary<string, string>(deserializedData, StringComparer.OrdinalIgnoreCase)
-                    : null;
+                var dto = default(TDto);
 
-                var dto = selector(job, DeserializeJob(job.InvocationData, job.Arguments), stateData);
+                if (job.InvocationData != null)
+                {
+                    var deserializedData = JobHelper.FromJson<Dictionary<string, string>>(job.StateData);
+                    var stateData = deserializedData != null
+                        ? new Dictionary<string, string>(deserializedData, StringComparer.OrdinalIgnoreCase)
+                        : null;
+
+                    dto = selector(job, DeserializeJob(job.InvocationData, job.Arguments), stateData);
+                }
 
                 result.Add(new KeyValuePair<string, TDto>(
                     job.Id.ToString(), dto));
@@ -530,14 +533,13 @@ where j.Id in @jobIds", _storage.GetSchemaName());
         }
 
         private JobList<FetchedJobDto> FetchedJobs(
-            SQLiteConnection connection,
-            IEnumerable<int> jobIds)
+            DbConnection connection, IEnumerable<int> jobIds)
         {
-            string fetchedJobsSql = string.Format(@"
-select j.*, s.Reason as StateReason, s.Data as StateData 
-from [{0}.Job] j
-left join [{0}.State] s on s.Id = j.StateId
-where j.Id in @jobIds", _storage.GetSchemaName());
+            string fetchedJobsSql = 
+$@"select j.*, s.Reason as StateReason, s.Data as StateData 
+from [{_storage.SchemaName}.Job] j
+left join [{_storage.SchemaName}.State] s on s.Id = j.StateId
+where j.Id in @jobIds";
 
             var jobs = connection.Query<SqlJob>(
                 fetchedJobsSql,
@@ -553,8 +555,7 @@ where j.Id in @jobIds", _storage.GetSchemaName());
                     new FetchedJobDto
                     {
                         Job = DeserializeJob(job.InvocationData, job.Arguments),
-                        State = job.StateName,
-                        FetchedAt = job.FetchedAt
+                        State = job.StateName                        
                     }));
             }
 

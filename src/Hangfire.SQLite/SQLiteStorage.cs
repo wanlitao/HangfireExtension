@@ -14,24 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Data.SQLite;
-using System.Text;
 using Hangfire.Annotations;
 using Hangfire.Server;
 using Hangfire.Storage;
+using System;
+using System.Collections.Generic;
 using System.Configuration;
+using System.Data;
+using System.Data.Common;
+using System.Data.SQLite;
+using System.Linq;
+using System.Text;
+using System.Threading;
 using System.Transactions;
 using IsolationLevel = System.Transactions.IsolationLevel;
-using System.Threading;
 
 namespace Hangfire.SQLite
 {
     public class SQLiteStorage : JobStorage
     {
-        private readonly SQLiteConnection _existingConnection;
+        private readonly DbConnection _existingConnection;
         private readonly SQLiteStorageOptions _options;
         private readonly string _connectionString;
         private static readonly TimeSpan ReaderWriterLockTimeout = TimeSpan.FromSeconds(30);
@@ -56,59 +58,45 @@ namespace Hangfire.SQLite
         /// config file.</exception>
         public SQLiteStorage(string nameOrConnectionString, SQLiteStorageOptions options)
         {
-            if (string.IsNullOrEmpty(nameOrConnectionString)) throw new ArgumentNullException("nameOrConnectionString");
-            if (options == null) throw new ArgumentNullException("options");
+            if (string.IsNullOrEmpty(nameOrConnectionString)) throw new ArgumentNullException(nameof(nameOrConnectionString));
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
-            _options = options;
-
-            if (IsConnectionString(nameOrConnectionString))
-            {
-                _connectionString = nameOrConnectionString;
-            }
-            else if (IsConnectionStringInConfiguration(nameOrConnectionString))
-            {
-                _connectionString = ConfigurationManager.ConnectionStrings[nameOrConnectionString].ConnectionString;
-            }
-            else
-            {
-                throw new ArgumentException(
-                    string.Format("Could not find connection string with name '{0}' in application config file",
-                                  nameOrConnectionString));
-            }
+            _connectionString = GetConnectionString(nameOrConnectionString);
+            _options = options;            
 
             if (!_dbMonitorCache.ContainsKey(_connectionString))
             {
                 _dbMonitorCache.Add(_connectionString, new ReaderWriterLockSlim());
             }
 
-            if (options.PrepareSchemaIfNecessary)
-            {
-                UseConnection(connection =>
-                {
-                    SQLiteObjectsInstaller.Install(connection, options.SchemaName);
-                });
-            }            
-            
-            InitializeQueueProviders();
+            Initialize();
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="SqlServerStorage"/> class with
-        /// explicit instance of the <see cref="SqlConnection"/> class that will be used
+        /// Initializes a new instance of the <see cref="SQLiteStorage"/> class with
+        /// explicit instance of the <see cref="DbConnection"/> class that will be used
         /// to query the data.
         /// </summary>
         /// <param name="existingConnection">Existing connection</param>
-        public SQLiteStorage([NotNull] SQLiteConnection existingConnection)
+        public SQLiteStorage([NotNull] DbConnection existingConnection)
+            : this(existingConnection, new SQLiteStorageOptions())
+        {            
+        }
+
+        public SQLiteStorage([NotNull] DbConnection existingConnection, [NotNull] SQLiteStorageOptions options)
         {
-            if (existingConnection == null) throw new ArgumentNullException("existingConnection");
+            if (existingConnection == null) throw new ArgumentNullException(nameof(existingConnection));
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
             _existingConnection = existingConnection;
-            _options = new SQLiteStorageOptions();
+            _options = options;
 
-            InitializeQueueProviders();
+            Initialize();
         }
 
         public PersistentJobQueueProviderCollection QueueProviders { get; private set; }
+
+        internal string SchemaName => _options.SchemaName;
 
         public override IMonitoringApi GetMonitoringApi()
         {
@@ -138,18 +126,24 @@ namespace Hangfire.SQLite
 
             try
             {
-                var connectionStringBuilder = new SQLiteConnectionStringBuilder(_connectionString);
+                var parts = _connectionString.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries))
+                    .Select(x => new { Key = x[0].Trim(), Value = x[1].Trim() })
+                    .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+                                
                 var builder = new StringBuilder();
 
-                builder.Append("Data Source: ");
-                builder.Append(connectionStringBuilder.DataSource);
-                builder.Append(", Version: ");
-                builder.Append(connectionStringBuilder.Version);
-                builder.Append(", Journal Mode: ");
-                builder.Append(connectionStringBuilder.JournalMode);
+                foreach (var alias in new[] { "Data Source", "Server", "Address" })
+                {
+                    if (parts.ContainsKey(alias))
+                    {
+                        builder.Append(parts[alias]);
+                        break;
+                    }
+                }
 
                 return builder.Length != 0
-                    ? String.Format("SQLite Server: {0}", builder)
+                    ? $"SQLite Server: {builder}"
                     : canNotParseMessage;
             }
             catch (Exception)
@@ -158,7 +152,7 @@ namespace Hangfire.SQLite
             }
         }
 
-        internal void UseConnection([InstantHandle] Action<SQLiteConnection> action, bool isWriteLock = false)
+        internal void UseConnection([InstantHandle] Action<DbConnection> action, bool isWriteLock = false)
         {
             UseConnection(connection =>
             {
@@ -167,9 +161,9 @@ namespace Hangfire.SQLite
             }, isWriteLock);
         }
 
-        internal T UseConnection<T>([InstantHandle] Func<SQLiteConnection, T> func, bool isWriteLock = false)
+        internal T UseConnection<T>([InstantHandle] Func<DbConnection, T> func, bool isWriteLock = false)
         {
-            SQLiteConnection connection = null;
+            DbConnection connection = null;
 
             try
             {
@@ -182,27 +176,32 @@ namespace Hangfire.SQLite
             }
         }
 
-        internal void UseTransaction([InstantHandle] Action<SQLiteConnection> action)
+        internal void UseTransaction([InstantHandle] Action<DbConnection, DbTransaction> action)
         {
-            UseTransaction(connection =>
+            UseTransaction((connection, transaction) =>
             {
-                action(connection);
+                action(connection, transaction);
                 return true;
             }, null);
         }
 
-        internal T UseTransaction<T>([InstantHandle] Func<SQLiteConnection, T> func, IsolationLevel? isolationLevel)
+        internal T UseTransaction<T>([InstantHandle] Func<DbConnection, DbTransaction, T> func, IsolationLevel? isolationLevel)
         {
             using (var transaction = CreateTransaction(isolationLevel ?? _options.TransactionIsolationLevel))
             {
-                var result = UseConnection(func, true);
+                var result = UseConnection(connection =>
+                {
+                    connection.EnlistTransaction(Transaction.Current);
+                    return func(connection, null);
+                }, true);
+
                 transaction.Complete();
 
                 return result;
             }
         }
 
-        internal SQLiteConnection CreateAndOpenConnection(bool isWriteLock = false)
+        internal DbConnection CreateAndOpenConnection(bool isWriteLock = false)
         {
             if (_existingConnection != null)
             {
@@ -223,11 +222,15 @@ namespace Hangfire.SQLite
             return connection;
         }
 
+        internal bool IsExistingConnection(IDbConnection connection)
+        {
+            return connection != null && ReferenceEquals(connection, _existingConnection);
+        }
+
         internal void ReleaseConnection(IDbConnection connection)
         {
-            if (connection != null && !ReferenceEquals(connection, _existingConnection))
-            {
-                connection.Close();
+            if (connection != null && !IsExistingConnection(connection))
+            {                
                 connection.Dispose();
 
                 ReleaseDbWriteLock();
@@ -241,25 +244,41 @@ namespace Hangfire.SQLite
             {
                 dbMonitor.ExitWriteLock();
             }            
-        }
+        }        
 
-        internal string GetSchemaName()
+        private void Initialize()
         {
-            return _options.SchemaName;
-        }
+            if (_options.PrepareSchemaIfNecessary)
+            {
+                UseConnection(connection =>
+                {
+                    SQLiteObjectsInstaller.Install(connection, _options.SchemaName);
+                });
+            }
 
-        private TransactionScope CreateTransaction(IsolationLevel? isolationLevel)
-        {
-            return isolationLevel != null
-                ? new TransactionScope(TransactionScopeOption.Required,
-                    new TransactionOptions { IsolationLevel = isolationLevel.Value, Timeout = _options.TransactionTimeout })
-                : new TransactionScope();
+            InitializeQueueProviders();
         }
 
         private void InitializeQueueProviders()
         {
             var defaultQueueProvider = new SQLiteJobQueueProvider(this, _options);
             QueueProviders = new PersistentJobQueueProviderCollection(defaultQueueProvider);
+        }
+
+        private string GetConnectionString(string nameOrConnectionString)
+        {
+            if (IsConnectionString(nameOrConnectionString))
+            {
+                return nameOrConnectionString;
+            }
+
+            if (IsConnectionStringInConfiguration(nameOrConnectionString))
+            {
+                return ConfigurationManager.ConnectionStrings[nameOrConnectionString].ConnectionString;
+            }
+
+            throw new ArgumentException(
+                $"Could not find connection string with name '{nameOrConnectionString}' in application config file");
         }
 
         private bool IsConnectionString(string nameOrConnectionString)
@@ -272,6 +291,14 @@ namespace Hangfire.SQLite
             var connectionStringSetting = ConfigurationManager.ConnectionStrings[connectionStringName];
 
             return connectionStringSetting != null;
+        }
+
+        private TransactionScope CreateTransaction(IsolationLevel? isolationLevel)
+        {
+            return isolationLevel != null
+                ? new TransactionScope(TransactionScopeOption.Required,
+                    new TransactionOptions { IsolationLevel = isolationLevel.Value, Timeout = _options.TransactionTimeout })
+                : new TransactionScope();
         }
     }
 }

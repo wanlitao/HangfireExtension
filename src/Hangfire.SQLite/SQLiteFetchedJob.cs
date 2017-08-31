@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
 using Dapper;
-using Hangfire.Storage;
 using Hangfire.Annotations;
+using Hangfire.Storage;
+using System;
 
 namespace Hangfire.SQLite
 {
@@ -31,9 +31,9 @@ namespace Hangfire.SQLite
             string jobId,
             string queue)
         {
-            if (storage == null) throw new ArgumentNullException("storage");            
-            if (jobId == null) throw new ArgumentNullException("jobId");
-            if (queue == null) throw new ArgumentNullException("queue");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));            
+            if (jobId == null) throw new ArgumentNullException(nameof(jobId));
+            if (queue == null) throw new ArgumentNullException(nameof(queue));
 
             _storage = storage;
 
@@ -50,8 +50,7 @@ namespace Hangfire.SQLite
         {
             _storage.UseConnection(connection =>
             {
-                connection.Execute(string.Format(@"
-                    delete from [{0}.JobQueue] where Id = @id", _storage.GetSchemaName()),
+                connection.Execute($@"delete from [{_storage.SchemaName}.JobQueue] where Id = @id",
                     new { id = Id });
             }, true);
         }
@@ -60,8 +59,7 @@ namespace Hangfire.SQLite
         {
             _storage.UseConnection(connection =>
             {
-                connection.Execute(string.Format(@"
-                    update [{0}.JobQueue] set FetchedAt = null where Id = @id", _storage.GetSchemaName()),
+                connection.Execute($@"update [{_storage.SchemaName}.JobQueue] set FetchedAt = null where Id = @id",
                     new { id = Id });
             }, true);
         }

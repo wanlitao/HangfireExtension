@@ -14,13 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Transactions;
 using Dapper;
 using Hangfire.Annotations;
-using System.Data.SQLite;
+using System;
+using System.Collections.Generic;
+using System.Data.Common;
+using System.Linq;
 
 namespace Hangfire.SQLite
 {
@@ -36,13 +35,13 @@ namespace Hangfire.SQLite
 
         public SQLiteJobQueueMonitoringApi([NotNull] SQLiteStorage storage)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
             _storage = storage;
         }
 
         public IEnumerable<string> GetQueues()
         {
-            string sqlQuery = string.Format(@"select distinct(Queue) from [{0}.JobQueue]", _storage.GetSchemaName());
+            string sqlQuery = $@"select distinct(Queue) from [{_storage.SchemaName}.JobQueue]";
 
             lock (_cacheLock)
             {
@@ -63,11 +62,11 @@ namespace Hangfire.SQLite
 
         public IEnumerable<int> GetEnqueuedJobIds(string queue, int @from, int perPage)
         {
-            string sqlQuery = string.Format(@"
-               select Id from [{0}.JobQueue]
-                where Queue = @queue
+            string sqlQuery = 
+            $@"select JobId from [{_storage.SchemaName}.JobQueue]
+                where Queue = @queue and FetchedAt is null
                order by Id
-               limit @limit offset @offset", _storage.GetSchemaName());
+               limit @limit offset @offset";
 
             return UseConnection(connection =>
             {
@@ -75,33 +74,55 @@ namespace Hangfire.SQLite
                     sqlQuery,
                     new { queue = queue, limit = perPage, offset = @from })
                     .ToList()
-                    .Select(x => x.Id)
+                    .Select(x => x.JobId)
                     .ToList();
             });
         }
 
         public IEnumerable<int> GetFetchedJobIds(string queue, int @from, int perPage)
         {
-            return Enumerable.Empty<int>();
+            string fetchedJobsSql =
+            $@"select JobId from [{_storage.SchemaName}.JobQueue]
+                where Queue = @queue and FetchedAt is not null
+               order by Id
+               limit @limit offset @offset";
+
+            return UseConnection(connection =>
+            {
+                return connection.Query<JobIdDto>(
+                    fetchedJobsSql,
+                    new { queue = queue, limit = perPage, offset = @from })
+                    .ToList()
+                    .Select(x => x.JobId)
+                    .ToList();
+            });            
         }
 
         public EnqueuedAndFetchedCountDto GetEnqueuedAndFetchedCount(string queue)
         {
-            string sqlQuery = string.Format(@"
-select count(Id) from [{0}.JobQueue] where [Queue] = @queue", _storage.GetSchemaName());
+            var sqlQuery = $@"
+select sum(Enqueued) as EnqueuedCount, sum(Fetched) as FetchedCount 
+from (
+    select 
+        case when FetchedAt is null then 1 else 0 end as Enqueued,
+        case when FetchedAt is not null then 1 else 0 end as Fetched
+    from [{_storage.SchemaName}].JobQueue
+    where Queue = @queue
+) q";
 
             return UseConnection(connection =>
             {
-                var result = connection.Query<int>(sqlQuery, new { queue = queue }).Single();
+                var result = connection.Query(sqlQuery, new { queue = queue }).Single();
 
                 return new EnqueuedAndFetchedCountDto
                 {
-                    EnqueuedCount = result,
+                    EnqueuedCount = result.EnqueuedCount,
+                    FetchedCount = result.FetchedCount
                 };
             });
         }
 
-        private T UseConnection<T>(Func<SQLiteConnection, T> func, bool isWriteLock = false)
+        private T UseConnection<T>(Func<DbConnection, T> func, bool isWriteLock = false)
         {
             return _storage.UseConnection(func, isWriteLock);
         }
@@ -109,7 +130,7 @@ select count(Id) from [{0}.JobQueue] where [Queue] = @queue", _storage.GetSchema
         // ReSharper disable once ClassNeverInstantiated.Local
         private class JobIdDto
         {
-            public int Id { get; set; }
+            public int JobId { get; set; }
         }
     }
 }

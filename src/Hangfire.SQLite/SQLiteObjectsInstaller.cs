@@ -14,17 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
-using System;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
-using System.Reflection;
 using Dapper;
 using Hangfire.Logging;
-using System.Data.SQLite;
+using System;
+using System.Data.Common;
+using System.IO;
+using System.Reflection;
 
 namespace Hangfire.SQLite
 {
-    [ExcludeFromCodeCoverage]
     internal static class SQLiteObjectsInstaller
     {
         private const int RequiredSchemaVersion = 5;
@@ -32,19 +30,19 @@ namespace Hangfire.SQLite
 
         private static readonly ILog Log = LogProvider.GetLogger(typeof(SQLiteStorage));
 
-        public static void Install(SQLiteConnection connection)
+        public static void Install(DbConnection connection)
         {
             Install(connection, null);
         }
 
-        public static void Install(SQLiteConnection connection, string schema)
+        public static void Install(DbConnection connection, string schema)
         {
-            if (connection == null) throw new ArgumentNullException("connection");
+            if (connection == null) throw new ArgumentNullException(nameof(connection));
             
             Log.Info("Start installing Hangfire SQL objects...");
 
             var script = GetStringResource(
-                typeof(SQLiteObjectsInstaller).Assembly, 
+                typeof(SQLiteObjectsInstaller).GetTypeInfo().Assembly, 
                 "Hangfire.SQLite.Install.sql");
 
             script = script.Replace("SET @TARGET_SCHEMA_VERSION = 5;", "SET @TARGET_SCHEMA_VERSION = " + RequiredSchemaVersion + ";");
@@ -58,9 +56,9 @@ namespace Hangfire.SQLite
                     connection.Execute(script);
                     break;
                 }
-                catch (SQLiteException ex)
+                catch
                 {
-                    throw;                    
+                    throw;
                 }
             }
 
@@ -73,10 +71,8 @@ namespace Hangfire.SQLite
             {
                 if (stream == null) 
                 {
-                    throw new InvalidOperationException(String.Format(
-                        "Requested resource `{0}` was not found in the assembly `{1}`.",
-                        resourceName,
-                        assembly));
+                    throw new InvalidOperationException(
+                        $"Requested resource `{resourceName}` was not found in the assembly `{assembly}`.");
                 }
 
                 using (var reader = new StreamReader(stream))

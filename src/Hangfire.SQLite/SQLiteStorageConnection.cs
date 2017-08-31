@@ -14,17 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
+using Dapper;
+using Hangfire.Annotations;
+using Hangfire.Common;
+using Hangfire.Server;
+using Hangfire.SQLite.Entities;
+using Hangfire.Storage;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading;
-using Dapper;
-using Hangfire.Common;
-using Hangfire.Server;
-using Hangfire.SQLite.Entities;
-using Hangfire.Storage;
-using Hangfire.Annotations;
 
 namespace Hangfire.SQLite
 {
@@ -34,7 +34,7 @@ namespace Hangfire.SQLite
 
         public SQLiteStorageConnection([NotNull] SQLiteStorage storage)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
             _storage = storage;
         }
 
@@ -50,7 +50,7 @@ namespace Hangfire.SQLite
 
 		public override IFetchedJob FetchNextJob(string[] queues, CancellationToken cancellationToken)
 		{
-			if (queues == null || queues.Length == 0) throw new ArgumentNullException("queues");
+			if (queues == null || queues.Length == 0) throw new ArgumentNullException(nameof(queues));
 
 			var providers = queues
 				.Select(queue => _storage.QueueProviders.GetProvider(queue))
@@ -59,9 +59,8 @@ namespace Hangfire.SQLite
 
 			if (providers.Length != 1)
 			{
-				throw new InvalidOperationException(String.Format(
-					"Multiple provider instances registered for queues: {0}. You should choose only one type of persistent queues per server instance.",
-					String.Join(", ", queues)));
+				throw new InvalidOperationException(
+					$"Multiple provider instances registered for queues: {String.Join(", ", queues)}. You should choose only one type of persistent queues per server instance.");
 			}
 
 			var persistentQueue = providers[0].GetJobQueue();
@@ -74,19 +73,19 @@ namespace Hangfire.SQLite
 			DateTime createdAt,
 			TimeSpan expireIn)
 		{
-			if (job == null) throw new ArgumentNullException("job");
-			if (parameters == null) throw new ArgumentNullException("parameters");
+			if (job == null) throw new ArgumentNullException(nameof(job));
+			if (parameters == null) throw new ArgumentNullException(nameof(parameters));
 
-            string createJobSql = string.Format(@"
-insert into [{0}.Job] (InvocationData, Arguments, CreatedAt, ExpireAt)
+            string createJobSql = 
+$@"insert into [{_storage.SchemaName}.Job] (InvocationData, Arguments, CreatedAt, ExpireAt)
 values (@invocationData, @arguments, @createdAt, @expireAt);
-SELECT last_insert_rowid()", _storage.GetSchemaName());
+SELECT last_insert_rowid()";
 
             var invocationData = InvocationData.Serialize(job);
 
             return _storage.UseConnection(connection =>
             {
-                var jobId = connection.Query<int>(
+                var jobId = connection.ExecuteScalar<long>(
                     createJobSql,
                     new
                     {
@@ -94,7 +93,7 @@ SELECT last_insert_rowid()", _storage.GetSchemaName());
                         arguments = invocationData.Arguments,
                         createdAt = createdAt,
                         expireAt = createdAt.Add(expireIn)
-                    }).Single().ToString();
+                    }).ToString();
 
                 if (parameters.Count > 0)
                 {
@@ -104,15 +103,15 @@ SELECT last_insert_rowid()", _storage.GetSchemaName());
                     {
                         parameterArray[parameterIndex++] = new
                         {
-                            jobId = jobId,
+                            jobId = long.Parse(jobId),
                             name = parameter.Key,
                             value = parameter.Value
                         };
                     }
 
-                    string insertParameterSql = string.Format(@"
-insert into [{0}.JobParameter] (JobId, Name, Value)
-values (@jobId, @name, @value)", _storage.GetSchemaName());
+                    string insertParameterSql = 
+$@"insert into [{_storage.SchemaName}.JobParameter] (JobId, Name, Value)
+values (@jobId, @name, @value)";
 
                     connection.Execute(insertParameterSql, parameterArray);
                 }
@@ -123,10 +122,10 @@ values (@jobId, @name, @value)", _storage.GetSchemaName());
 
 		public override JobData GetJobData(string id)
 		{
-            if (id == null) throw new ArgumentNullException("id");
+            if (id == null) throw new ArgumentNullException(nameof(id));
 
-            string sql =
-                string.Format(@"select InvocationData, StateName, Arguments, CreatedAt from [{0}.Job] where Id = @id", _storage.GetSchemaName());
+            string sql = 
+$@"select InvocationData, StateName, Arguments, CreatedAt from [{_storage.SchemaName}.Job] where Id = @id";
 
             return _storage.UseConnection(connection =>
             {
@@ -163,17 +162,17 @@ values (@jobId, @name, @value)", _storage.GetSchemaName());
 
 		public override StateData GetStateData(string jobId)
 		{
-            if (jobId == null) throw new ArgumentNullException("jobId");
+            if (jobId == null) throw new ArgumentNullException(nameof(jobId));
 
-            string sql = string.Format(@"
-select s.Name, s.Reason, s.Data
-from [{0}.State] s
-inner join [{0}.Job] j on j.StateId = s.Id
-where j.Id = @jobId", _storage.GetSchemaName());
+            string sql = 
+$@"select s.Name, s.Reason, s.Data
+from [{_storage.SchemaName}.State] s
+inner join [{_storage.SchemaName}.Job] j on j.StateId = s.Id
+where j.Id = @jobId";
 
             return _storage.UseConnection(connection =>
             {
-                var sqlState = connection.Query<SqlState>(sql, new { jobId = jobId }).SingleOrDefault();
+                var sqlState = connection.Query<SqlState>(sql, new { jobId = long.Parse(jobId) }).SingleOrDefault();
                 if (sqlState == null)
                 {
                     return null;
@@ -192,27 +191,28 @@ where j.Id = @jobId", _storage.GetSchemaName());
             });
         }
 
-		public override void SetJobParameter(string jobId, string name, string value)
+		public override void SetJobParameter(string id, string name, string value)
 		{
-			if (jobId == null) throw new ArgumentNullException("jobId");
-			if (name == null) throw new ArgumentNullException("name");
+			if (id == null) throw new ArgumentNullException(nameof(id));
+			if (name == null) throw new ArgumentNullException(nameof(name));
 
             _storage.UseConnection(connection =>
             {
-                string tableName = string.Format("[{0}.JobParameter]", _storage.GetSchemaName());
-                var fetchedParam = connection.Query<JobParameter>(string.Format("select * from {0} where JobId = @jobId and Name = @name", tableName),
+                string tableName = $"[{_storage.SchemaName}.JobParameter]";
+                long jobId = long.Parse(id);
+                var fetchedParam = connection.Query<JobParameter>($"select * from {tableName} where JobId = @jobId and Name = @name",
                   new { jobId = jobId, name = name }).Any();
 
                 if (!fetchedParam)
                 {
                     // insert
-                    connection.Execute(string.Format(@"insert into {0} (JobId, Name, Value) values (@jobId, @name, @value);", tableName),
+                    connection.Execute($@"insert into {tableName} (JobId, Name, Value) values (@jobId, @name, @value);",
                     new { jobId = jobId, name, value });
                 }
                 else
                 {
                     // update
-                    connection.Execute(string.Format(@"update {0} set Value = @value where JobId = @jobId and Name = @name;", tableName),
+                    connection.Execute($@"update {tableName} set Value = @value where JobId = @jobId and Name = @name;",
                     new { jobId = jobId, name, value });
                 }
             }, true);
@@ -220,23 +220,22 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
 		public override string GetJobParameter(string id, string name)
 		{
-			if (id == null) throw new ArgumentNullException("id");
-			if (name == null) throw new ArgumentNullException("name");
+			if (id == null) throw new ArgumentNullException(nameof(id));
+			if (name == null) throw new ArgumentNullException(nameof(name));
 
-            return _storage.UseConnection(connection => connection.Query<string>(
-                string.Format(@"select Value from [{0}.JobParameter] where JobId = @id and Name = @name", _storage.GetSchemaName()),
-                new { id = id, name = name })
-                .SingleOrDefault());
+            return _storage.UseConnection(connection => connection.ExecuteScalar<string>(
+                $@"select Value from [{_storage.SchemaName}.JobParameter] where JobId = @id and Name = @name limit 1",
+                new { id = long.Parse(id), name = name }));
         }
 
 		public override HashSet<string> GetAllItemsFromSet(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
             return _storage.UseConnection(connection =>
             {
                 var result = connection.Query<string>(
-                    string.Format(@"select Value from [{0}.Set] where [Key] = @key", _storage.GetSchemaName()),
+                    $@"select Value from [{_storage.SchemaName}.Set] where [Key] = @key",
                     new { key });
 
                 return new HashSet<string>(result);
@@ -245,19 +244,18 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
 		public override string GetFirstByLowestScoreFromSet(string key, double fromScore, double toScore)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 			if (toScore < fromScore) throw new ArgumentException("The `toScore` value must be higher or equal to the `fromScore` value.");
 
-            return _storage.UseConnection(connection => connection.Query<string>(
-                string.Format(@"select Value from [{0}.Set] where [Key] = @key and Score between @from and @to order by Score limit 1", _storage.GetSchemaName()),
-                new { key, from = fromScore, to = toScore })
-                .SingleOrDefault());
+            return _storage.UseConnection(connection => connection.ExecuteScalar<string>(
+                $@"select Value from [{_storage.SchemaName}.Set] where [Key] = @key and Score between @from and @to order by Score limit 1",
+                new { key, from = fromScore, to = toScore }));
         }
 
 		public override void SetRangeInHash(string key, IEnumerable<KeyValuePair<string, string>> keyValuePairs)
 		{
-			if (key == null) throw new ArgumentNullException("key");
-			if (keyValuePairs == null) throw new ArgumentNullException("keyValuePairs");
+			if (key == null) throw new ArgumentNullException(nameof(key));
+			if (keyValuePairs == null) throw new ArgumentNullException(nameof(keyValuePairs));
 
 //            const string sql = @"
 //;merge [HangFire.Hash] with (holdlock) as Target
@@ -266,25 +264,27 @@ where j.Id = @jobId", _storage.GetSchemaName());
 //when matched then update set Value = Source.Value
 //when not matched then insert ([Key], Field, Value) values (Source.[Key], Source.Field, Source.Value);";
 
-            _storage.UseTransaction(connection =>
+            _storage.UseTransaction((connection, transaction) =>
             {
-                string tableName = string.Format("[{0}.Hash]", _storage.GetSchemaName());
-                var selectSqlStr = string.Format("select * from {0} where [Key] = @key and Field = @field", tableName);
-                var insertSqlStr = string.Format("insert into {0} ([Key], Field, Value) values (@key, @field, @value)", tableName);
-                var updateSqlStr = string.Format("update {0} set Value = @value where [Key] = @key and Field = @field ", tableName);
+                string tableName = $"[{_storage.SchemaName}.Hash]";
+                var selectSqlStr = $"select * from {tableName} where [Key] = @key and Field = @field";
+                var insertSqlStr = $"insert into {tableName} ([Key], Field, Value) values (@key, @field, @value)";
+                var updateSqlStr = $"update {tableName} set Value = @value where [Key] = @key and Field = @field";
                 foreach (var keyValuePair in keyValuePairs)
                 {
                     var fetchedHash = connection.Query<SqlHash>(selectSqlStr,
-                        new { key = key, field = keyValuePair.Key });
+                        new { key = key, field = keyValuePair.Key }, transaction);
                     if (!fetchedHash.Any())
                     {
                         connection.Execute(insertSqlStr,
-                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value });
+                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value },
+                            transaction);
                     }
                     else
                     {
                         connection.Execute(updateSqlStr,
-                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value });
+                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value },
+                            transaction);
                     }                    
                 }
             });			
@@ -292,12 +292,12 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
 		public override Dictionary<string, string> GetAllEntriesFromHash(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
             return _storage.UseConnection(connection =>
             {
                 var result = connection.Query<SqlHash>(
-                    string.Format("select Field, Value from [{0}.Hash] where [Key] = @key", _storage.GetSchemaName()),
+                    $"select Field, Value from [{_storage.SchemaName}.Hash] where [Key] = @key",
                     new { key })
                     .ToDictionary(x => x.Field, x => x.Value);
 
@@ -307,8 +307,8 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
 		public override void AnnounceServer(string serverId, ServerContext context)
 		{
-			if (serverId == null) throw new ArgumentNullException("serverId");
-			if (context == null) throw new ArgumentNullException("context");
+			if (serverId == null) throw new ArgumentNullException(nameof(serverId));
+			if (context == null) throw new ArgumentNullException(nameof(context));
 
 			var data = new ServerData
 			{
@@ -319,22 +319,22 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
             _storage.UseConnection(connection =>
             {
-                string tableName = string.Format("[{0}.Server]", _storage.GetSchemaName());
+                string tableName = $"[{_storage.SchemaName}.Server]";
                 // select by serverId
                 var serverResult = connection.Query<Entities.Server>(
-                    string.Format("select * from {0} where Id = @id", tableName),
+                    $"select * from {tableName} where Id = @id",
                     new { id = serverId }).SingleOrDefault();
 
                 if (serverResult == null)
                 {
                     // if not found insert
-                    connection.Execute(string.Format("insert into {0} (Id, Data, LastHeartbeat) values (@id, @data, @lastHeartbeat)", tableName),
+                    connection.Execute($"insert into {tableName} (Id, Data, LastHeartbeat) values (@id, @data, @lastHeartbeat)",
                         new { id = serverId, data = JobHelper.ToJson(data), lastHeartbeat = DateTime.UtcNow });
                 }
                 else
                 {
                     // if found, update data + heartbeart
-                    connection.Execute(string.Format("update {0} set Data = @data, LastHeartbeat = @lastHeartbeat where Id = @id", tableName),
+                    connection.Execute($"update {tableName} set Data = @data, LastHeartbeat = @lastHeartbeat where Id = @id",
                         new { id = serverId, data = JobHelper.ToJson(data), lastHeartbeat = DateTime.UtcNow });
                 }
             }, true);		
@@ -350,24 +350,24 @@ where j.Id = @jobId", _storage.GetSchemaName());
 
 		public override void RemoveServer(string serverId)
 		{
-			if (serverId == null) throw new ArgumentNullException("serverId");
+			if (serverId == null) throw new ArgumentNullException(nameof(serverId));
 
             _storage.UseConnection(connection =>
             {
                 connection.Execute(
-                    string.Format(@"delete from [{0}.Server] where Id = @id", _storage.GetSchemaName()),
+                    $@"delete from [{_storage.SchemaName}.Server] where Id = @id",
                     new { id = serverId });
             }, true);
         }
 
 		public override void Heartbeat(string serverId)
 		{
-			if (serverId == null) throw new ArgumentNullException("serverId");
+			if (serverId == null) throw new ArgumentNullException(nameof(serverId));
 
             _storage.UseConnection(connection =>
             {
                 connection.Execute(
-                    string.Format(@"update [{0}.Server] set LastHeartbeat = @lastHeartbeat where Id = @id", _storage.GetSchemaName()),
+                    $@"update [{_storage.SchemaName}.Server] set LastHeartbeat = @lastHeartbeat where Id = @id",
                     new { id = serverId, lastHeartbeat = DateTime.UtcNow });
             }, true);
         }
@@ -376,33 +376,34 @@ where j.Id = @jobId", _storage.GetSchemaName());
 		{
 			if (timeOut.Duration() != timeOut)
 			{
-				throw new ArgumentException("The `timeOut` value must be positive.", "timeOut");
+				throw new ArgumentException("The `timeOut` value must be positive.", nameof(timeOut));
 			}            
 
             return _storage.UseConnection(connection => connection.Execute(
-                string.Format(@"delete from [{0}.Server] where LastHeartbeat < @timeOutAt", _storage.GetSchemaName()),
-                new { timeOutAt = DateTime.UtcNow.Add(timeOut.Negate()) }), true);
+                $@"delete from [{_storage.SchemaName}.Server] where LastHeartbeat < @timeOutAt",
+                new { timeOutAt = DateTime.UtcNow.Add(timeOut.Negate()) }
+            ), true);
         }
 
 		public override long GetSetCount(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
             return _storage.UseConnection(connection => connection.Query<int>(
-                string.Format("select count([Key]) from [{0}.Set] where [Key] = @key", _storage.GetSchemaName()),
+                $"select count([Key]) from [{_storage.SchemaName}.Set] where [Key] = @key",
                 new { key = key }).First());
         }
 
 		public override List<string> GetRangeFromSet(string key, int startingFrom, int endingAt)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-			string query = string.Format(@"
-select [Value] 
-from [{0}.Set]
+			string query = 
+$@"select [Value] 
+from [{_storage.SchemaName}.Set]
 where [Key] = @key 
 order by Id asc
-limit @limit offset @offset", _storage.GetSchemaName());
+limit @limit offset @offset";
 
             return _storage.UseConnection(connection => connection
                 .Query<string>(query, new { key = key, limit = endingAt - startingFrom + 1, offset = startingFrom })
@@ -411,115 +412,115 @@ limit @limit offset @offset", _storage.GetSchemaName());
 
 		public override TimeSpan GetSetTtl(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select min([ExpireAt]) from [{0}.Set]
-where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"select min([ExpireAt]) from [{_storage.SchemaName}.Set]
+where [Key] = @key";
 
             return _storage.UseConnection(connection =>
             {
-                var result = connection.Query<DateTime?>(query, new { key = key }).Single();
+                var result = connection.ExecuteScalar<DateTime?>(query, new { key = key });
                 if (!result.HasValue) return TimeSpan.FromSeconds(-1);
 
-                return result.Value.ToLocalTime() - DateTime.UtcNow.ToLocalTime();
+                return result.Value - DateTime.UtcNow;
             });
         }
 
 		public override long GetCounter(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select sum(s.[Value]) from (select sum([Value]) as [Value] from [{0}.Counter]
+            string query = 
+$@"select sum(s.[Value]) from (select sum([Value]) as [Value] from [{_storage.SchemaName}.Counter]
 where [Key] = @key
 union all
-select [Value] from [{0}.AggregatedCounter]
-where [Key] = @key) as s", _storage.GetSchemaName());
+select [Value] from [{_storage.SchemaName}.AggregatedCounter]
+where [Key] = @key) as s";
 
             return _storage.UseConnection(connection =>
-                connection.Query<long?>(query, new { key = key }).Single() ?? 0);
+                connection.ExecuteScalar<long?>(query, new { key = key }) ?? 0);
         }
 
 		public override long GetHashCount(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select count([Id]) from [{0}.Hash]
-where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"select count([Id]) from [{_storage.SchemaName}.Hash]
+where [Key] = @key";
 
-            return _storage.UseConnection(connection => connection.Query<long>(query, new { key = key }).Single());
+            return _storage.UseConnection(connection => connection.ExecuteScalar<long>(query, new { key = key }));
         }
 
 		public override TimeSpan GetHashTtl(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select min([ExpireAt]) from [{0}.Hash]
-where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"select min([ExpireAt]) from [{_storage.SchemaName}.Hash]
+where [Key] = @key";
 
             return _storage.UseConnection(connection =>
             {
-                var result = connection.Query<DateTime?>(query, new { key = key }).Single();
+                var result = connection.ExecuteScalar<DateTime?>(query, new { key = key });
                 if (!result.HasValue) return TimeSpan.FromSeconds(-1);
 
-                return result.Value.ToLocalTime() - DateTime.UtcNow.ToLocalTime();
+                return result.Value - DateTime.UtcNow;
             });
         }
 
 		public override string GetValueFromHash(string key, string name)
 		{
-			if (key == null) throw new ArgumentNullException("key");
-			if (name == null) throw new ArgumentNullException("name");
+			if (key == null) throw new ArgumentNullException(nameof(key));
+			if (name == null) throw new ArgumentNullException(nameof(name));
 
-            string query = string.Format(@"
-select [Value] from [{0}.Hash]
-where [Key] = @key and [Field] = @field", _storage.GetSchemaName());
+            string query = 
+$@"select [Value] from [{_storage.SchemaName}.Hash]
+where [Key] = @key and [Field] = @field";
 
             return _storage.UseConnection(connection => connection
-                .Query<string>(query, new { key = key, field = name }).SingleOrDefault());
+                .ExecuteScalar<string>(query, new { key = key, field = name }));
         }
 
 		public override long GetListCount(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select count([Id]) from [{0}.List]
-where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"select count([Id]) from [{_storage.SchemaName}.List]
+where [Key] = @key";
 
-            return _storage.UseConnection(connection => connection.Query<long>(query, new { key = key }).Single());
+            return _storage.UseConnection(connection => connection.ExecuteScalar<long>(query, new { key = key }));
         }
 
 		public override TimeSpan GetListTtl(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select min([ExpireAt]) from [{0}.List]
-where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"select min([ExpireAt]) from [{_storage.SchemaName}.List]
+where [Key] = @key";
 
             return _storage.UseConnection(connection =>
             {
-                var result = connection.Query<DateTime?>(query, new { key = key }).Single();
+                var result = connection.ExecuteScalar<DateTime?>(query, new { key = key });
                 if (!result.HasValue) return TimeSpan.FromSeconds(-1);
 
-                return result.Value.ToLocalTime() - DateTime.UtcNow.ToLocalTime();
+                return result.Value - DateTime.UtcNow;
             });
         }
 
 		public override List<string> GetRangeFromList(string key, int startingFrom, int endingAt)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-			string query = string.Format(@"
-	select [Value] 
-	from [{0}.List]
+			string query = 
+    $@"select [Value] 
+	from [{_storage.SchemaName}.List]
 	where [Key] = @key 
 	order by Id desc
-	limit @limit offset @offset", _storage.GetSchemaName());
+	limit @limit offset @offset";
 
 			return _storage.UseConnection(connection => connection
                 .Query<string>(query, new { key = key, limit = endingAt - startingFrom + 1, offset = startingFrom })
@@ -528,14 +529,16 @@ where [Key] = @key", _storage.GetSchemaName());
 
 		public override List<string> GetAllItemsFromList(string key)
 		{
-			if (key == null) throw new ArgumentNullException("key");
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-select [Value] from [{0}.List]
+            string query = 
+$@"select [Value] from [{_storage.SchemaName}.List]
 where [Key] = @key
-order by [Id] desc", _storage.GetSchemaName());
+order by [Id] desc";
 
-            return _storage.UseConnection(connection => connection.Query<string>(query, new { key = key }).ToList());
+            return _storage.UseConnection(connection => connection
+                .Query<string>(query, new { key = key })
+                .ToList());
         }
 	}
 }

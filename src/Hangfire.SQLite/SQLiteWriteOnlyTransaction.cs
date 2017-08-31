@@ -14,95 +14,99 @@
 // You should have received a copy of the GNU Lesser General Public 
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
+using Dapper;
+using Hangfire.Annotations;
+using Hangfire.Common;
+using Hangfire.SQLite.Entities;
+using Hangfire.States;
+using Hangfire.Storage;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.Linq;
-using System.Data.SQLite;
-using Dapper;
-using Hangfire.Common;
-using Hangfire.States;
-using Hangfire.Storage;
-using Hangfire.Annotations;
-using Hangfire.SQLite.Entities;
 
 namespace Hangfire.SQLite
 {
     internal class SQLiteWriteOnlyTransaction : JobStorageTransaction
     {
         //private readonly Queue<Action<System.Data.SQLite.SQLiteConnection>> _commandQueue = new Queue<Action<System.Data.SQLite.SQLiteConnection>>();
-        private readonly Queue<Action<SQLiteConnection>> _commandQueue = new Queue<Action<SQLiteConnection>>();
+        private readonly Queue<Action<DbConnection, DbTransaction>> _commandQueue = new Queue<Action<DbConnection, DbTransaction>>();
         //private readonly SortedSet<string> _lockedResources = new SortedSet<string>();
         private readonly SQLiteStorage _storage;        
 
         public SQLiteWriteOnlyTransaction([NotNull] SQLiteStorage storage)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
 
             _storage = storage;
         }
 
         public override void Commit()
         {
-            _storage.UseTransaction(connection =>
+            _storage.UseTransaction((connection, transaction) =>
             {
                 foreach (var command in _commandQueue)
                 {
-                    command(connection);
+                    command(connection, transaction);
                 }                
             });
         }
 
         public override void ExpireJob(string jobId, TimeSpan expireIn)
         {
-            QueueCommand(x => x.Execute(
-               string.Format(@"update [{0}.Job] set ExpireAt = @expireAt where Id = @id", _storage.GetSchemaName()),
-                new { expireAt = DateTime.UtcNow.Add(expireIn), id = jobId }));
+            QueueCommand((connection, transaction) => connection.Execute(
+               $@"update [{_storage.SchemaName}.Job] set ExpireAt = @expireAt where Id = @id",
+                new { expireAt = DateTime.UtcNow.Add(expireIn), id = long.Parse(jobId) },
+                transaction));
         }
 
         public override void PersistJob(string jobId)
         {
-            QueueCommand(x => x.Execute(
-                string.Format(@"update [{0}.Job] set ExpireAt = NULL where Id = @id", _storage.GetSchemaName()),
-                new { id = jobId }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"update [{_storage.SchemaName}.Job] set ExpireAt = NULL where Id = @id",
+                new { id = long.Parse(jobId) },
+                transaction));
         }
 
         public override void SetJobState(string jobId, IState state)
         {
-            string addAndSetStateSql = string.Format(@"
-insert into [{0}.State] (JobId, Name, Reason, CreatedAt, Data)
+            string addAndSetStateSql = 
+$@"insert into [{_storage.SchemaName}.State] (JobId, Name, Reason, CreatedAt, Data)
 values (@jobId, @name, @reason, @createdAt, @data);
-update [{0}.Job] set StateId = last_insert_rowid(), StateName = @name where Id = @id;", _storage.GetSchemaName());
+update [{_storage.SchemaName}.Job] set StateId = last_insert_rowid(), StateName = @name where Id = @id;";
 
-            QueueCommand(x => x.Execute(
+            QueueCommand((connection, transaction) => connection.Execute(
                 addAndSetStateSql,
                 new
                 {
-                    jobId = jobId,
+                    jobId = long.Parse(jobId),
                     name = state.Name,
                     reason = state.Reason,
                     createdAt = DateTime.UtcNow,
                     data = JobHelper.ToJson(state.SerializeData()),
-                    id = jobId
-                }));
+                    id = long.Parse(jobId)
+                },
+                transaction));
         }
 
         public override void AddJobState(string jobId, IState state)
         {
-            string addStateSql = string.Format(@"
-insert into [{0}.State] (JobId, Name, Reason, CreatedAt, Data)
-values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
+            string addStateSql = 
+$@"insert into [{_storage.SchemaName}.State] (JobId, Name, Reason, CreatedAt, Data)
+values (@jobId, @name, @reason, @createdAt, @data)";
 
-            QueueCommand(x => x.Execute(
+            QueueCommand((connection, transaction) => connection.Execute(
                 addStateSql,
                 new
                 {
-                    jobId = jobId, 
+                    jobId = long.Parse(jobId), 
                     name = state.Name,
                     reason = state.Reason,
                     createdAt = DateTime.UtcNow, 
                     data = JobHelper.ToJson(state.SerializeData())
-                }));
+                },
+                transaction));
         }
 
         public override void AddToQueue(string queue, string jobId)
@@ -110,35 +114,39 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
             var provider = _storage.QueueProviders.GetProvider(queue);
             var persistentQueue = provider.GetJobQueue();
 
-            QueueCommand(x => persistentQueue.Enqueue(x, queue, jobId));
+            QueueCommand((connection, transaction) => persistentQueue.Enqueue(connection, queue, jobId));
         }
 
         public override void IncrementCounter(string key)
         {
-            QueueCommand(x => x.Execute(
-                string.Format(@"insert into [{0}.Counter] ([Key], [Value]) values (@key, @value)", _storage.GetSchemaName()),
-                new { key, value = +1 }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"insert into [{_storage.SchemaName}.Counter] ([Key], [Value]) values (@key, @value)",
+                new { key, value = +1 },
+                transaction));
         }
 
         public override void IncrementCounter(string key, TimeSpan expireIn)
         {
-            QueueCommand(x => x.Execute(
-                string.Format(@"insert into [{0}.Counter] ([Key], [Value], [ExpireAt]) values (@key, @value, @expireAt)", _storage.GetSchemaName()),
-                new { key, value = +1, expireAt = DateTime.UtcNow.Add(expireIn) }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"insert into [{_storage.SchemaName}.Counter] ([Key], [Value], [ExpireAt]) values (@key, @value, @expireAt)",
+                new { key, value = +1, expireAt = DateTime.UtcNow.Add(expireIn) },
+                transaction));
         }
 
         public override void DecrementCounter(string key)
         {
-            QueueCommand(x => x.Execute(
-                string.Format(@"insert into [{0}.Counter] ([Key], [Value]) values (@key, @value)", _storage.GetSchemaName()),
-                new { key, value = -1 }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"insert into [{_storage.SchemaName}.Counter] ([Key], [Value]) values (@key, @value)",
+                new { key, value = -1 },
+                transaction));
         }
 
         public override void DecrementCounter(string key, TimeSpan expireIn)
         {
-            QueueCommand(x => x.Execute(
-                string.Format(@"insert into [{0}.Counter] ([Key], [Value], [ExpireAt]) values (@key, @value, @expireAt)", _storage.GetSchemaName()),
-                new { key, value = -1, expireAt = DateTime.UtcNow.Add(expireIn) }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"insert into [{_storage.SchemaName}.Counter] ([Key], [Value], [ExpireAt]) values (@key, @value, @expireAt)",
+                new { key, value = -1, expireAt = DateTime.UtcNow.Add(expireIn) },
+                transaction));
         }
 
         public override void AddToSet(string key, string value)
@@ -156,52 +164,55 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
 //when not matched then insert ([Key], Value, Score) values (Source.[Key], Source.Value, Source.Score);", _storage.GetSchemaName());
 
             AcquireSetLock();
-            QueueCommand(connection =>
+            QueueCommand((connection, transaction) =>
             {
-                string tableName = string.Format("[{0}.Set]", _storage.GetSchemaName());
-                var selectSqlStr = string.Format("select * from {0} where [Key] = @key and Value = @value", tableName);
-                var insertSqlStr = string.Format("insert into {0} ([Key], Value, Score) values (@key, @value, @score)", tableName);
-                var updateSqlStr = string.Format("update {0} set Score = @score where [Key] = @key and Value = @value ", tableName);
+                string tableName = $"[{_storage.SchemaName}.Set]";
+                var selectSqlStr = $"select * from {tableName} where [Key] = @key and Value = @value";
+                var insertSqlStr = $"insert into {tableName} ([Key], Value, Score) values (@key, @value, @score)";
+                var updateSqlStr = $"update {tableName} set Score = @score where [Key] = @key and Value = @value";
                 
                 var fetchedSet = connection.Query<SqlSet>(selectSqlStr,
-                    new { key = key, value = value });
+                    new { key = key, value = value }, transaction);
                 if (!fetchedSet.Any())
                 {
                     connection.Execute(insertSqlStr,
-                        new { key = key, value, score });
+                        new { key = key, value, score }, transaction);
                 }
                 else
                 {
                     connection.Execute(updateSqlStr,
-                        new { key = key, value, score });
+                        new { key = key, value, score }, transaction);
                 }                
             });
         }
 
         public override void RemoveFromSet(string key, string value)
         {
-            string query = string.Format(@"delete from [{0}.Set] where [Key] = @key and Value = @value", _storage.GetSchemaName());
+            string query = $@"delete from [{_storage.SchemaName}.Set] where [Key] = @key and Value = @value";
 
             AcquireSetLock();
-            QueueCommand(x => x.Execute(
+            QueueCommand((connection, transaction) => connection.Execute(
                 query,
-                new { key, value }));
+                new { key, value },
+                transaction));
         }
 
         public override void InsertToList(string key, string value)
         {
             AcquireListLock();
-            QueueCommand(x => x.Execute(
-                string.Format(@"insert into [{0}.List] ([Key], Value) values (@key, @value);", _storage.GetSchemaName()),
-                new { key, value }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"insert into [{_storage.SchemaName}.List] ([Key], Value) values (@key, @value);",
+                new { key, value },
+                transaction));
         }
 
         public override void RemoveFromList(string key, string value)
         {
             AcquireListLock();
-            QueueCommand(x => x.Execute(
-                string.Format(@"delete from [{0}.List] where [Key] = @key and Value = @value", _storage.GetSchemaName()),
-                new { key, value }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                $@"delete from [{_storage.SchemaName}.List] where [Key] = @key and Value = @value",
+                new { key, value },
+                transaction));
         }
 
         public override void TrimList(string key, int keepStartingFrom, int keepEndingAt)
@@ -213,20 +224,21 @@ values (@jobId, @name, @reason, @createdAt, @data)", _storage.GetSchemaName());
 //    where [Key] = @key)
 //delete from cte where row_num not between @start and @end", _storage.GetSchemaName());
 
-            string trimSql = string.Format(@"
-delete from [{0}.List] where [Key] = @key and Id not in (
-  select Id from [{0}.List] where [Key] = @key order by Id desc limit @limit offset @offset)", _storage.GetSchemaName());
+            string trimSql = 
+$@"delete from [{_storage.SchemaName}.List] where [Key] = @key and Id not in (
+  select Id from [{_storage.SchemaName}.List] where [Key] = @key order by Id desc limit @limit offset @offset)";
 
             AcquireListLock();
-            QueueCommand(x => x.Execute(
+            QueueCommand((connection, transaction) => connection.Execute(
                 trimSql,
-                new { key = key, limit = keepEndingAt - keepStartingFrom + 1, offset = keepStartingFrom }));
+                new { key = key, limit = keepEndingAt - keepStartingFrom + 1, offset = keepStartingFrom },
+                transaction));
         }
 
         public override void SetRangeInHash(string key, IEnumerable<KeyValuePair<string, string>> keyValuePairs)
         {
-            if (key == null) throw new ArgumentNullException("key");
-            if (keyValuePairs == null) throw new ArgumentNullException("keyValuePairs");
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            if (keyValuePairs == null) throw new ArgumentNullException(nameof(keyValuePairs));
 
 //            string sql = string.Format(@"
 //;merge [{0}.Hash] as Target
@@ -236,25 +248,25 @@ delete from [{0}.List] where [Key] = @key and Id not in (
 //when not matched then insert ([Key], Field, Value) values (Source.[Key], Source.Field, Source.Value);", _storage.GetSchemaName());
 
             AcquireHashLock();
-            QueueCommand(connection =>
+            QueueCommand((connection, transaction) =>
             {
-                string tableName = string.Format("[{0}.Hash]", _storage.GetSchemaName());
-                var selectSqlStr = string.Format("select * from {0} where [Key] = @key and Field = @field", tableName);
-                var insertSqlStr = string.Format("insert into {0} ([Key], Field, Value) values (@key, @field, @value)", tableName);
-                var updateSqlStr = string.Format("update {0} set Value = @value where [Key] = @key and Field = @field ", tableName);
+                string tableName = $"[{_storage.SchemaName}.Hash]";
+                var selectSqlStr = $"select * from {tableName} where [Key] = @key and Field = @field";
+                var insertSqlStr = $"insert into {tableName} ([Key], Field, Value) values (@key, @field, @value)";
+                var updateSqlStr = $"update {tableName} set Value = @value where [Key] = @key and Field = @field ";
                 foreach (var keyValuePair in keyValuePairs)
                 {
                     var fetchedHash = connection.Query<SqlHash>(selectSqlStr,
-                        new { key = key, field = keyValuePair.Key });
+                        new { key = key, field = keyValuePair.Key }, transaction);
                     if (!fetchedHash.Any())
                     {
                         connection.Execute(insertSqlStr,
-                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value });
+                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value }, transaction);
                     }
                     else
                     {
                         connection.Execute(updateSqlStr,
-                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value });
+                            new { key = key, field = keyValuePair.Key, value = keyValuePair.Value }, transaction);
                     }
                 }
             });
@@ -262,121 +274,137 @@ delete from [{0}.List] where [Key] = @key and Id not in (
 
         public override void RemoveHash(string key)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"delete from [{0}.Hash] where [Key] = @key", _storage.GetSchemaName());
+            string query = $@"delete from [{_storage.SchemaName}.Hash] where [Key] = @key";
 
             AcquireHashLock();
-            QueueCommand(x => x.Execute(query, new { key }));
+            QueueCommand((connection, transaction) => connection.Execute(query, new { key }, transaction));
         }
 
         public override void AddRangeToSet(string key, IList<string> items)
         {
-            if (key == null) throw new ArgumentNullException("key");
-            if (items == null) throw new ArgumentNullException("items");
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            if (items == null) throw new ArgumentNullException(nameof(items));
 
-            string query = string.Format(@"
-insert into [{0}.Set] ([Key], Value, Score)
-values (@key, @value, 0.0)", _storage.GetSchemaName());
+            string query = 
+$@"insert into [{_storage.SchemaName}.Set] ([Key], Value, Score)
+values (@key, @value, 0.0)";
 
             AcquireSetLock();
-            QueueCommand(x => x.Execute(query, items.Select(value => new { key = key, value = value }).ToList()));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query,
+                items.Select(value => new { key = key, value = value }).ToList(),
+                transaction));
         }
 
         public override void RemoveSet(string key)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"delete from [{0}.Set] where [Key] = @key", _storage.GetSchemaName());
+            string query = $@"delete from [{_storage.SchemaName}.Set] where [Key] = @key";
 
             AcquireSetLock();
-            QueueCommand(x => x.Execute(query, new { key = key }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query, new { key = key }, transaction));
         }
 
         public override void ExpireHash(string key, TimeSpan expireIn)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.Hash] set ExpireAt = @expireAt where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.Hash] set ExpireAt = @expireAt where [Key] = @key";
 
             AcquireHashLock();
-            QueueCommand(x => x.Execute(query, new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query,
+                new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) },
+                transaction));
         }
 
         public override void ExpireSet(string key, TimeSpan expireIn)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.Set] set ExpireAt = @expireAt where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.Set] set ExpireAt = @expireAt where [Key] = @key";
 
             AcquireSetLock();
-            QueueCommand(x => x.Execute(query, new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query,
+                new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) },
+                transaction));
         }
 
         public override void ExpireList(string key, TimeSpan expireIn)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.List] set ExpireAt = @expireAt where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.List] set ExpireAt = @expireAt where [Key] = @key";
 
             AcquireListLock();
-            QueueCommand(x => x.Execute(query, new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query,
+                new { key = key, expireAt = DateTime.UtcNow.Add(expireIn) },
+                transaction));
         }
 
         public override void PersistHash(string key)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.Hash] set ExpireAt = null where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.Hash] set ExpireAt = null where [Key] = @key";
 
             AcquireHashLock();
-            QueueCommand(x => x.Execute(query, new { key = key }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query, new { key = key }, transaction));
         }
 
         public override void PersistSet(string key)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.Set] set ExpireAt = null where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.Set] set ExpireAt = null where [Key] = @key";
 
             AcquireSetLock();
-            QueueCommand(x => x.Execute(query, new { key = key }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query, new { key = key }, transaction));
         }
 
         public override void PersistList(string key)
         {
-            if (key == null) throw new ArgumentNullException("key");
+            if (key == null) throw new ArgumentNullException(nameof(key));
 
-            string query = string.Format(@"
-update [{0}.List] set ExpireAt = null where [Key] = @key", _storage.GetSchemaName());
+            string query = 
+$@"update [{_storage.SchemaName}.List] set ExpireAt = null where [Key] = @key";
 
             AcquireListLock();
-            QueueCommand(x => x.Execute(query, new { key = key }));
+            QueueCommand((connection, transaction) => connection.Execute(
+                query, new { key = key }, transaction));
         }
 
-        internal void QueueCommand(Action<IDbConnection> action)
+        internal void QueueCommand(Action<DbConnection, DbTransaction> action)
         {
             _commandQueue.Enqueue(action);
         }
 
         private void AcquireListLock()
         {
-            AcquireLock(String.Format("Hangfire:List:Lock"));
+            AcquireLock("Hangfire:List:Lock");
         }
 
         private void AcquireSetLock()
         {
-            AcquireLock(String.Format("Hangfire:Set:Lock"));
+            AcquireLock("Hangfire:Set:Lock");
         }
 
         private void AcquireHashLock()
         {
-            AcquireLock(String.Format("Hangfire:Hash:Lock"));
+            AcquireLock("Hangfire:Hash:Lock");
         }
 
         private void AcquireLock(string resource)

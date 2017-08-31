@@ -29,10 +29,10 @@ namespace Hangfire.SQLite
             TransactionIsolationLevel = null;
             QueuePollInterval = TimeSpan.FromSeconds(15);
             InvisibilityTimeout = TimeSpan.FromMinutes(30);
-            JobExpirationCheckInterval = TimeSpan.FromHours(1);
+            JobExpirationCheckInterval = TimeSpan.FromMinutes(30);
             CountersAggregateInterval = TimeSpan.FromMinutes(5);
             PrepareSchemaIfNecessary = true;
-            DashboardJobListLimit = 50000;
+            DashboardJobListLimit = 10000;
             _schemaName = Constants.DefaultSchema;
             TransactionTimeout = TimeSpan.FromMinutes(1);
         }
@@ -44,17 +44,15 @@ namespace Hangfire.SQLite
             get { return _queuePollInterval; }
             set
             {
-                var message = String.Format(
-                    "The QueuePollInterval property value should be positive. Given: {0}.",
-                    value);
+                var message = $"The QueuePollInterval property value should be positive. Given: {value}.";
 
                 if (value == TimeSpan.Zero)
                 {
-                    throw new ArgumentException(message, "value");
+                    throw new ArgumentException(message, nameof(value));
                 }
                 if (value != value.Duration())
                 {
-                    throw new ArgumentException(message, "value");
+                    throw new ArgumentException(message, nameof(value));
                 }
 
                 _queuePollInterval = value;
@@ -80,7 +78,7 @@ namespace Hangfire.SQLite
             {
                 if (string.IsNullOrWhiteSpace(_schemaName))
                 {
-                    throw new ArgumentException(_schemaName, "value");
+                    throw new ArgumentException(_schemaName, nameof(value));
                 }
                 _schemaName = value;
             }
