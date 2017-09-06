@@ -50,13 +50,13 @@ namespace Hangfire.SQLite
         public static IGlobalConfiguration<SQLiteStorage> UseSelfSQLiteStorage(
             [NotNull] this IGlobalConfiguration configuration,
             [NotNull] SQLiteStorageOptions options,
-            string SQLiteFileName = "HangfireSelf")
+            string sqliteFileName = "HangfireSelf")
         {
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
             if (options == null) throw new ArgumentNullException(nameof(options));
-            if (string.IsNullOrWhiteSpace(SQLiteFileName)) throw new ArgumentException($"{nameof(SQLiteFileName)} is null or white space");
+            if (string.IsNullOrWhiteSpace(sqliteFileName)) throw new ArgumentException($"{nameof(sqliteFileName)} is null or white space");
 
-            string sqlitePath = $"{Directory.GetCurrentDirectory()}\\{SQLiteFileName}.sqlite";
+            string sqlitePath = $"{Directory.GetCurrentDirectory()}\\{sqliteFileName}.sqlite";
             string sqliteConnectionString = $"Data Source={sqlitePath};Version=3;";
 
             if (!File.Exists(sqlitePath))
