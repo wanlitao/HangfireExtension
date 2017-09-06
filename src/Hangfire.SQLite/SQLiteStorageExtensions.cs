@@ -16,6 +16,7 @@
 
 using Hangfire.Annotations;
 using System;
+using System.IO;
 
 // ReSharper disable once CheckNamespace
 namespace Hangfire.SQLite
@@ -43,6 +44,27 @@ namespace Hangfire.SQLite
             if (options == null) throw new ArgumentNullException(nameof(options));
 
             var storage = new SQLiteStorage(nameOrConnectionString, options);
+            return configuration.UseStorage(storage);
+        }
+        
+        public static IGlobalConfiguration<SQLiteStorage> UseSelfSQLiteStorage(
+            [NotNull] this IGlobalConfiguration configuration,
+            [NotNull] SQLiteStorageOptions options,
+            string SQLiteFileName = "HangfireSelf")
+        {
+            if (configuration == null) throw new ArgumentNullException(nameof(configuration));
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrWhiteSpace(SQLiteFileName)) throw new ArgumentException($"{nameof(SQLiteFileName)} is null or white space");
+
+            string sqlitePath = $"{Directory.GetCurrentDirectory()}\\{SQLiteFileName}.sqlite";
+            string sqliteConnectionString = $"Data Source={sqlitePath};Version=3;";
+
+            if (!File.Exists(sqlitePath))
+            {
+                System.Data.SQLite.SQLiteConnection.CreateFile(sqlitePath);
+            }
+
+            SQLiteStorage storage = new SQLiteStorage(sqliteConnectionString, options);
             return configuration.UseStorage(storage);
         }
     }
