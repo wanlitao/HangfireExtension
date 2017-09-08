@@ -22,12 +22,17 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.Common;
-using System.Data.SQLite;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Transactions;
 using IsolationLevel = System.Transactions.IsolationLevel;
+
+#if NETSTANDARD
+using Microsoft.Data.Sqlite;
+#else
+using System.Data.SQLite;
+#endif
 
 namespace Hangfire.SQLite
 {
@@ -211,12 +216,16 @@ namespace Hangfire.SQLite
             if (isWriteLock)
             {
                 _dbMonitorCache[_connectionString].TryEnterWriteLock(ReaderWriterLockTimeout);
-            }            
+            }
 
+#if NETSTANDARD
+            var connection = new SqliteConnection(_connectionString);
+#else
             var connection = new SQLiteConnection(_connectionString)
             {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
-                Flags = SQLiteConnectionFlags.MapIsolationLevels                
+                Flags = SQLiteConnectionFlags.MapIsolationLevels
             };
+#endif
             connection.Open();
 
             return connection;
