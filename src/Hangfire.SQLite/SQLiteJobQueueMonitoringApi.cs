@@ -106,7 +106,7 @@ from (
     select 
         case when FetchedAt is null then 1 else 0 end as Enqueued,
         case when FetchedAt is not null then 1 else 0 end as Fetched
-    from [{_storage.SchemaName}].JobQueue
+    from [{_storage.SchemaName}.JobQueue]
     where Queue = @queue
 ) q";
 
