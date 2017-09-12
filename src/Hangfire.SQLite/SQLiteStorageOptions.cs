@@ -15,7 +15,12 @@
 // License along with Hangfire. If not, see <http://www.gnu.org/licenses/>.
 
 using System;
+
+#if NETSTANDARD
+using System.Data;
+#else
 using System.Transactions;
+#endif
 
 namespace Hangfire.SQLite
 {

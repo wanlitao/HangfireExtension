@@ -2,7 +2,7 @@
 {
     public class EnqueuedAndFetchedCountDto
     {
-        public int? EnqueuedCount { get; set; }
-        public int? FetchedCount { get; set; }
+        public long? EnqueuedCount { get; set; }
+        public long? FetchedCount { get; set; }
     }
 }

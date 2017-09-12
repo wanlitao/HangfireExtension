@@ -25,13 +25,13 @@ using System.Data.Common;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Transactions;
-using IsolationLevel = System.Transactions.IsolationLevel;
 
 #if NETSTANDARD
 using Microsoft.Data.Sqlite;
 #else
 using System.Data.SQLite;
+using System.Transactions;
+using IsolationLevel = System.Transactions.IsolationLevel;
 #endif
 
 namespace Hangfire.SQLite
@@ -192,6 +192,18 @@ namespace Hangfire.SQLite
 
         internal T UseTransaction<T>([InstantHandle] Func<DbConnection, DbTransaction, T> func, IsolationLevel? isolationLevel)
         {
+#if NETSTANDARD
+            return UseConnection(connection =>
+            {
+                using (var transaction = connection.BeginTransaction(isolationLevel ?? _options.TransactionIsolationLevel ?? IsolationLevel.ReadCommitted))
+                {
+                    var result = func(connection, transaction);
+                    transaction.Commit();
+
+                    return result;
+                }
+            }, true);
+#else
             using (var transaction = CreateTransaction(isolationLevel ?? _options.TransactionIsolationLevel))
             {
                 var result = UseConnection(connection =>
@@ -204,6 +216,7 @@ namespace Hangfire.SQLite
 
                 return result;
             }
+#endif
         }
 
         internal DbConnection CreateAndOpenConnection(bool isWriteLock = false)
@@ -302,6 +315,7 @@ namespace Hangfire.SQLite
             return connectionStringSetting != null;
         }
 
+#if !NETSTANDARD        
         private TransactionScope CreateTransaction(IsolationLevel? isolationLevel)
         {
             return isolationLevel != null
@@ -309,5 +323,6 @@ namespace Hangfire.SQLite
                     new TransactionOptions { IsolationLevel = isolationLevel.Value, Timeout = _options.TransactionTimeout })
                 : new TransactionScope();
         }
+#endif
     }
 }
