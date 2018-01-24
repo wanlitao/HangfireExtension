@@ -28,7 +28,7 @@ namespace Hangfire.SQLite
     internal class SQLiteJobQueue : IPersistentJobQueue
     {
         private readonly SQLiteStorage _storage;
-        private readonly SQLiteStorageOptions _options;        
+        private readonly SQLiteStorageOptions _options;
 
         public SQLiteJobQueue([NotNull] SQLiteStorage storage, SQLiteStorageOptions options)
         {
@@ -47,19 +47,19 @@ namespace Hangfire.SQLite
 
             FetchedJob fetchedJob = null;
 
-//            string fetchJobSqlTemplate = string.Format(@"
-//delete top (1) from [{0}].JobQueue with (readpast, updlock, rowlock)
-//output DELETED.Id, DELETED.JobId, DELETED.Queue
-//where (FetchedAt is null or FetchedAt < DATEADD(second, @timeout, GETUTCDATE()))
-//and Queue in @queues", _storage.GetSchemaName());
+            //            string fetchJobSqlTemplate = string.Format(@"
+            //delete top (1) from [{0}].JobQueue with (readpast, updlock, rowlock)
+            //output DELETED.Id, DELETED.JobId, DELETED.Queue
+            //where (FetchedAt is null or FetchedAt < DATEADD(second, @timeout, GETUTCDATE()))
+            //and Queue in @queues", _storage.GetSchemaName());
 
-            string fetchNextJobSqlTemplate = 
+            string fetchNextJobSqlTemplate =
 $@"select * from [{_storage.SchemaName}.JobQueue]
 where (FetchedAt is null or FetchedAt < @fetchedAt)
 and Queue in @queues
 limit 1";
 
-            string dequeueJobSqlTemplate = 
+            string dequeueJobSqlTemplate =
 $@"update [{_storage.SchemaName}.JobQueue] set FetchedAt = @fetchedAt where Id = @id";
 
             do
@@ -69,9 +69,13 @@ $@"update [{_storage.SchemaName}.JobQueue] set FetchedAt = @fetchedAt where Id =
                 _storage.UseConnection(connection =>
                 {
                     fetchedJob = connection.Query<FetchedJob>(
-                               fetchNextJobSqlTemplate,
-                               new { queues = queues, fetchedAt = DateTime.UtcNow })
-                               .SingleOrDefault();
+                            fetchNextJobSqlTemplate,
+                            new {
+                                queues = queues,
+                                //implement FetchedAt < DATEADD(second, @timeout, GETUTCDATE())
+                                fetchedAt = DateTime.UtcNow.AddSeconds(_options.SlidingInvisibilityTimeout.Negate().TotalSeconds) 
+                            })
+                        .SingleOrDefault();
 
                     if (fetchedJob != null)
                     {
@@ -90,14 +94,14 @@ $@"update [{_storage.SchemaName}.JobQueue] set FetchedAt = @fetchedAt where Id =
 
             return new SQLiteFetchedJob(
                 _storage,
-                fetchedJob.Id,                
+                fetchedJob.Id,
                 fetchedJob.JobId.ToString(CultureInfo.InvariantCulture),
                 fetchedJob.Queue);
         }
 
         public void Enqueue(IDbConnection connection, string queue, string jobId)
         {
-            string enqueueJobSql = 
+            string enqueueJobSql =
 $@"insert into [{_storage.SchemaName}.JobQueue] (JobId, Queue) values (@jobId, @queue)";
 
             connection.Execute(enqueueJobSql, new { jobId = long.Parse(jobId), queue = queue });

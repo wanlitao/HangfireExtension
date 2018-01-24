@@ -67,6 +67,23 @@ namespace Hangfire.SQLite
         [Obsolete("Does not make sense anymore. Background jobs re-queued instantly even after ungraceful shutdown now. Will be removed in 2.0.0.")]
         public TimeSpan InvisibilityTimeout { get; set; }
 
+        TimeSpan _slidingInvisibilityTimeout = TimeSpan.FromSeconds(5);
+
+        public TimeSpan SlidingInvisibilityTimeout
+        {
+            get { return _slidingInvisibilityTimeout; }
+            set
+            {
+                if (value <= TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException("Sliding timeout should be greater than zero");
+                }
+
+                _slidingInvisibilityTimeout = value;
+            }
+        }
+
+
         public bool PrepareSchemaIfNecessary { get; set; }
 
         public TimeSpan JobExpirationCheckInterval { get; set; }
