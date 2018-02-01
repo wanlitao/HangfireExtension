@@ -56,12 +56,12 @@ CREATE TABLE IF NOT EXISTS [$(HangFireSchema).JobQueue] (
         [Id]    INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         [JobId] integer NOT NULL,
         [Queue] nvarchar(50) NOT NULL COLLATE NOCASE,
-        [FetchedAt]     datetime
-
+		[Status]	varchar(1) NOT NULL,
+        [FetchedAt]	datetime
 );
 CREATE INDEX IF NOT EXISTS [JobQueue_IX_HangFire_JobQueue_QueueAndFetchedAt]
 ON [$(HangFireSchema).JobQueue]
-([Queue] DESC, [FetchedAt] DESC);
+([Queue] DESC, [Status] DESC, [FetchedAt] DESC);
 
 CREATE TABLE IF NOT EXISTS [$(HangFireSchema).Server] (
         [Id]    nvarchar(100) PRIMARY KEY NOT NULL COLLATE NOCASE,
