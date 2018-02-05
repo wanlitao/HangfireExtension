@@ -40,6 +40,7 @@ namespace Hangfire.SQLite
             DashboardJobListLimit = 10000;
             _schemaName = Constants.DefaultSchema;
             TransactionTimeout = TimeSpan.FromMinutes(1);
+            JobQueueExecutionTimeout = TimeSpan.FromMinutes(60);
         }
 
         public IsolationLevel? TransactionIsolationLevel { get; set; }
@@ -66,6 +67,31 @@ namespace Hangfire.SQLite
 
         [Obsolete("Does not make sense anymore. Background jobs re-queued instantly even after ungraceful shutdown now. Will be removed in 2.0.0.")]
         public TimeSpan InvisibilityTimeout { get; set; }
+
+        TimeSpan _slidingInvisibilityTimeout = TimeSpan.FromSeconds(5);
+
+        public TimeSpan SlidingInvisibilityTimeout
+        {
+            get { return _slidingInvisibilityTimeout; }
+            set
+            {
+                if (value <= TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException("Sliding timeout should be greater than zero");
+                }
+
+                _slidingInvisibilityTimeout = value;
+            }
+        }
+
+        /// <summary>
+        /// Timeout for execution of job in JobQueue, default 60 mins.
+        /// If job didn't finish before timeout, the job will be dequeued and executed again.
+        /// Increase the value if you have long-run jobs, 
+        /// decrease the value if you want to retry the failed jobs sooner.
+        /// </summary>
+        public TimeSpan JobQueueExecutionTimeout { get; set; }
+
 
         public bool PrepareSchemaIfNecessary { get; set; }
 
