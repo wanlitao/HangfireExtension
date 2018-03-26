@@ -121,34 +121,12 @@ namespace Hangfire.SQLite
 
         public override string ToString()
         {
-            const string canNotParseMessage = "<Connection string can not be parsed>";
-
-            try
-            {
-                var parts = _connectionString.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(x => x.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries))
-                    .Select(x => new { Key = x[0].Trim(), Value = x[1].Trim() })
-                    .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
-                                
-                var builder = new StringBuilder();
-
-                foreach (var alias in new[] { "Data Source", "Server", "Address" })
-                {
-                    if (parts.ContainsKey(alias))
-                    {
-                        builder.Append(parts[alias]);
-                        break;
-                    }
-                }
-
-                return builder.Length != 0
-                    ? $"SQLite Server: {builder}"
-                    : canNotParseMessage;
-            }
-            catch (Exception)
-            {
-                return canNotParseMessage;
-            }
+#if NETSTANDARD
+            var connectionStringBuilder = new SqliteConnectionStringBuilder(_connectionString);
+#else
+            var connectionStringBuilder = new SQLiteConnectionStringBuilder(_connectionString);
+#endif
+            return $"SQLite: {connectionStringBuilder.DataSource}";
         }
 
         internal void UseConnection([InstantHandle] Action<DbConnection> action, bool isWriteLock = false)
