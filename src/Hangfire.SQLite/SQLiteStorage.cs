@@ -19,11 +19,8 @@ using Hangfire.Server;
 using Hangfire.Storage;
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Data.Common;
-using System.Linq;
-using System.Text;
 using System.Threading;
 
 #if NETSTANDARD
@@ -50,24 +47,19 @@ namespace Hangfire.SQLite
         }
 
         /// <summary>
-        /// Initializes SqlServerStorage from the provided SQLiteStorageOptions and either the provided connection
-        /// string or the connection string with provided name pulled from the application config file.       
+        /// Initializes SQLiteStorage from the provided SQLiteStorageOptions and the provided connection string.
         /// </summary>
-        /// <param name="nameOrConnectionString">Either a SQL Server connection string or the name of 
-        /// a SQL Server connection string located in the connectionStrings node in the application config</param>
+        /// <param name="connectionString">A SQLite connection string</param>
         /// <param name="options"></param>
-        /// <exception cref="ArgumentNullException"><paramref name="nameOrConnectionString"/> argument is null.</exception>
+        /// <exception cref="ArgumentNullException"><paramref name="connectionString"/> argument is null.</exception>
         /// <exception cref="ArgumentNullException"><paramref name="options"/> argument is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="nameOrConnectionString"/> argument is neither 
-        /// a valid SQL Server connection string nor the name of a connection string in the application
-        /// config file.</exception>
-        public SQLiteStorage(string nameOrConnectionString, SQLiteStorageOptions options)
+        public SQLiteStorage(string connectionString, SQLiteStorageOptions options)
         {
-            if (string.IsNullOrEmpty(nameOrConnectionString)) throw new ArgumentNullException(nameof(nameOrConnectionString));
+            if (string.IsNullOrEmpty(connectionString)) throw new ArgumentNullException(nameof(connectionString));
             if (options == null) throw new ArgumentNullException(nameof(options));
 
-            _connectionString = GetConnectionString(nameOrConnectionString);
-            _options = options;            
+            _connectionString = connectionString;
+            _options = options;
 
             if (!_dbMonitorCache.ContainsKey(_connectionString))
             {
@@ -127,34 +119,12 @@ namespace Hangfire.SQLite
 
         public override string ToString()
         {
-            const string canNotParseMessage = "<Connection string can not be parsed>";
-
-            try
-            {
-                var parts = _connectionString.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(x => x.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries))
-                    .Select(x => new { Key = x[0].Trim(), Value = x[1].Trim() })
-                    .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
-                                
-                var builder = new StringBuilder();
-
-                foreach (var alias in new[] { "Data Source", "Server", "Address" })
-                {
-                    if (parts.ContainsKey(alias))
-                    {
-                        builder.Append(parts[alias]);
-                        break;
-                    }
-                }
-
-                return builder.Length != 0
-                    ? $"SQLite Server: {builder}"
-                    : canNotParseMessage;
-            }
-            catch (Exception)
-            {
-                return canNotParseMessage;
-            }
+#if NETSTANDARD
+            var connectionStringBuilder = new SqliteConnectionStringBuilder(_connectionString);
+#else
+            var connectionStringBuilder = new SQLiteConnectionStringBuilder(_connectionString);
+#endif
+            return $"SQLite: {connectionStringBuilder.DataSource}";
         }
 
         internal void UseConnection([InstantHandle] Action<DbConnection> action, bool isWriteLock = false)
@@ -235,7 +205,7 @@ namespace Hangfire.SQLite
             var connection = new SqliteConnection(_connectionString);
 #else
             var connection = new SQLiteConnection(_connectionString)
-            {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
+            {
                 Flags = SQLiteConnectionFlags.MapIsolationLevels
             };
 #endif
@@ -285,34 +255,6 @@ namespace Hangfire.SQLite
         {
             var defaultQueueProvider = new SQLiteJobQueueProvider(this, _options);
             QueueProviders = new PersistentJobQueueProviderCollection(defaultQueueProvider);
-        }
-
-        private string GetConnectionString(string nameOrConnectionString)
-        {
-            if (IsConnectionString(nameOrConnectionString))
-            {
-                return nameOrConnectionString;
-            }
-
-            if (IsConnectionStringInConfiguration(nameOrConnectionString))
-            {
-                return ConfigurationManager.ConnectionStrings[nameOrConnectionString].ConnectionString;
-            }
-
-            throw new ArgumentException(
-                $"Could not find connection string with name '{nameOrConnectionString}' in application config file");
-        }
-
-        private bool IsConnectionString(string nameOrConnectionString)
-        {
-            return nameOrConnectionString.Contains(";");
-        }
-
-        private bool IsConnectionStringInConfiguration(string connectionStringName)
-        {
-            var connectionStringSetting = ConfigurationManager.ConnectionStrings[connectionStringName];
-
-            return connectionStringSetting != null;
         }
 
 #if !NETSTANDARD        
