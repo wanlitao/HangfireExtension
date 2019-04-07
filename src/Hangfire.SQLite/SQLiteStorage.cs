@@ -25,6 +25,7 @@ using System.Data.Common;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Text.RegularExpressions;
 
 #if NETSTANDARD
 using Microsoft.Data.Sqlite;
@@ -305,7 +306,7 @@ namespace Hangfire.SQLite
 
         private bool IsConnectionString(string nameOrConnectionString)
         {
-            return nameOrConnectionString.Contains(";");
+            return Regex.IsMatch(nameOrConnectionString, @"data[\s]source=.+", RegexOptions.IgnoreCase);
         }
 
         private bool IsConnectionStringInConfiguration(string connectionStringName)
