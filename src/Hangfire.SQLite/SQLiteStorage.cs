@@ -67,7 +67,7 @@ namespace Hangfire.SQLite
             if (options == null) throw new ArgumentNullException(nameof(options));
 
             _connectionString = GetConnectionString(nameOrConnectionString);
-            _options = options;            
+            _options = options;
 
             if (!_dbMonitorCache.ContainsKey(_connectionString))
             {
@@ -85,7 +85,7 @@ namespace Hangfire.SQLite
         /// <param name="existingConnection">Existing connection</param>
         public SQLiteStorage([NotNull] DbConnection existingConnection)
             : this(existingConnection, new SQLiteStorageOptions())
-        {            
+        {
         }
 
         public SQLiteStorage([NotNull] DbConnection existingConnection, [NotNull] SQLiteStorageOptions options)
@@ -135,10 +135,10 @@ namespace Hangfire.SQLite
                     .Select(x => x.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries))
                     .Select(x => new { Key = x[0].Trim(), Value = x[1].Trim() })
                     .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
-                                
+
                 var builder = new StringBuilder();
 
-                foreach (var alias in new[] { "Data Source", "Server", "Address" })
+                foreach (var alias in new[] { "Data Source", "DataSource", "Server", "Address" })
                 {
                     if (parts.ContainsKey(alias))
                     {
@@ -174,7 +174,7 @@ namespace Hangfire.SQLite
             {
                 connection = CreateAndOpenConnection(isWriteLock);
                 return func(connection);
-            }                 
+            }
             finally
             {
                 ReleaseConnection(connection);
@@ -235,7 +235,7 @@ namespace Hangfire.SQLite
             var connection = new SqliteConnection(_connectionString);
 #else
             var connection = new SQLiteConnection(_connectionString)
-            {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
+            {   //SQLite只支锟斤拷IsolationLevel.Serializable锟斤拷IsolationLevel.ReadCommitted, 锟斤拷锟斤拷锟斤拷锟斤拷IsolationLevel锟皆讹拷转锟斤拷为锟斤拷锟斤拷锟斤拷之一
                 Flags = SQLiteConnectionFlags.MapIsolationLevels
             };
 #endif
@@ -252,7 +252,7 @@ namespace Hangfire.SQLite
         internal void ReleaseConnection(IDbConnection connection)
         {
             if (connection != null && !IsExistingConnection(connection))
-            {                
+            {
                 connection.Dispose();
 
                 ReleaseDbWriteLock();
@@ -265,8 +265,8 @@ namespace Hangfire.SQLite
             if (dbMonitor.IsWriteLockHeld)
             {
                 dbMonitor.ExitWriteLock();
-            }            
-        }        
+            }
+        }
 
         private void Initialize()
         {
@@ -305,7 +305,8 @@ namespace Hangfire.SQLite
 
         private bool IsConnectionString(string nameOrConnectionString)
         {
-            return nameOrConnectionString.Contains(";");
+            //return nameOrConnectionString.Contains(";");
+            return new string[] { "Data Source", "DataSource", "Server", "Address", ";" }.Any(nameOrConnectionString.Contains)
         }
 
         private bool IsConnectionStringInConfiguration(string connectionStringName)
