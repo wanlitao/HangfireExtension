@@ -138,7 +138,7 @@ namespace Hangfire.SQLite
                                 
                 var builder = new StringBuilder();
 
-                foreach (var alias in new[] { "Data Source", "Server", "Address" })
+                foreach (var alias in new[] { "Data Source", "DataSource", "Server", "Address" })
                 {
                     if (parts.ContainsKey(alias))
                     {
@@ -235,7 +235,7 @@ namespace Hangfire.SQLite
             var connection = new SqliteConnection(_connectionString);
 #else
             var connection = new SQLiteConnection(_connectionString)
-            {   //SQLite只支持IsolationLevel.Serializable和IsolationLevel.ReadCommitted, 设置其它IsolationLevel自动转换为这两种之一
+            {   //SQLite只支锟斤拷IsolationLevel.Serializable锟斤拷IsolationLevel.ReadCommitted, 锟斤拷锟斤拷锟斤拷锟斤拷IsolationLevel锟皆讹拷转锟斤拷为锟斤拷锟斤拷锟斤拷之一
                 Flags = SQLiteConnectionFlags.MapIsolationLevels
             };
 #endif
